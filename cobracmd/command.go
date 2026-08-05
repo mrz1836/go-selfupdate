@@ -36,10 +36,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	selfupdate "github.com/mrz1836/go-selfupdate"
 	"github.com/mrz1836/go-selfupdate/notify"
+	"github.com/spf13/cobra"
 )
 
 // Command naming and flag names. The flag set mirrors what the fleet's

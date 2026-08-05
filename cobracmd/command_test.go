@@ -20,10 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	selfupdate "github.com/mrz1836/go-selfupdate"
 	"github.com/mrz1836/go-selfupdate/notify"
+	"github.com/spf13/cobra"
 )
 
 // errSourceUnavailable stands in for a release lookup that failed.

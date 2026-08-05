@@ -19,11 +19,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
-
 	selfupdate "github.com/mrz1836/go-selfupdate"
 	"github.com/mrz1836/go-selfupdate/cobracmd"
 	"github.com/mrz1836/go-selfupdate/notify"
+	"github.com/spf13/cobra"
 )
 
 // Identity of the tool being updated. In a real CLI these are constants
