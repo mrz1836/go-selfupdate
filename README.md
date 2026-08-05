@@ -177,6 +177,8 @@ cobracmd.AttachBanner(root, notify.Config{ /* … */ })
 
 A complete, buildable program is in [`examples/minimal`](examples/minimal/main.go).
 
+<br>
+
 ### 2. Or drive it programmatically
 
 Prefer to own the control flow? The core API is two functions — `Check` never writes,
@@ -189,6 +191,8 @@ result, err := selfupdate.Install(ctx, cfg, selfupdate.WithForce())
 
 `Check` is safe to call from anywhere — a doctor command, a status line, a test. It is the
 same call `--check` makes.
+
+<br>
 
 ### 3. What happens during an update
 
