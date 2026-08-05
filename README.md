@@ -192,6 +192,15 @@ result, err := selfupdate.Install(ctx, cfg, selfupdate.WithForce())
 `Check` is safe to call from anywhere — a doctor command, a status line, a test. It is the
 same call `--check` makes.
 
+`InstallPreflight(cfg)` answers the *location* half of the question with no network at all:
+it resolves the running binary and applies the same managed-install and writable-directory
+guards `Install` will, returning `ErrManagedInstall` or `ErrInstallDirNotWritable` when a
+future update would be blocked by where the binary lives. `--check` uses it to warn — while
+still reporting the version — when the install directory is not writable, so a binary in a
+root-owned location like `/usr/local/bin` is flagged *before* a release ships rather than
+only when one does. The guidance points at a user-writable directory (`~/.local/bin`), never
+sudo: elevating just re-creates the binary root-owned and moves the wall to the next release.
+
 <br>
 
 ### 3. What happens during an update
