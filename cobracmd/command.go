@@ -166,7 +166,7 @@ func New(cfg selfupdate.Config, opts ...CmdOption) *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.BoolP(flagForce, "f", false, "Install the latest release even when it is not newer than the running version")
-	flags.Bool(flagCheck, false, "Report whether an update is available without installing anything")
+	flags.BoolP(flagCheck, "c", false, "Report whether an update is available without installing anything")
 	flags.BoolP(flagVerbose, "v", false, "Narrate each step, and print the release notes with --check")
 
 	if o.useBinaryFlag {

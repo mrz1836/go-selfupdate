@@ -49,7 +49,7 @@ func TestNewRegistersCoreFlags(t *testing.T) {
 		shorthand string
 	}{
 		{flagForce, "f"},
-		{flagCheck, ""},
+		{flagCheck, "c"},
 		{flagVerbose, "v"},
 	} {
 		flag := cmd.Flags().Lookup(tc.name)
