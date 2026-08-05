@@ -18,7 +18,7 @@ const asciiBanner = `
   |                                                                      |
   |   Current: v1.0.0         Latest: v1.2.0                             |
   |                                                                      |
-  |   Upgrade:                                                           |
+  |   Update:                                                            |
   |   widget update                                                      |
   |                                                                      |
   +----------------------------------------------------------------------+
@@ -291,16 +291,17 @@ func TestPadRightAndPadVersion(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		in    string
-		width int
-		want  string
+		in          string
+		width       int
+		want        string // padRight pads or truncates to width
+		wantVersion string // padVersion pads to a minimum but never truncates
 	}{
-		"pads short":         {in: "ab", width: 5, want: "ab   "},
-		"exact width":        {in: "abcde", width: 5, want: "abcde"},
-		"truncates long":     {in: "abcdefgh", width: 5, want: "abcde"},
-		"multi-byte counted": {in: "héllo", width: 6, want: "héllo "},
-		"multi-byte cut":     {in: "héllo", width: 3, want: "hél"},
-		"empty":              {in: "", width: 3, want: "   "},
+		"pads short":  {in: "ab", width: 5, want: "ab   ", wantVersion: "ab   "},
+		"exact width": {in: "abcde", width: 5, want: "abcde", wantVersion: "abcde"},
+		"long: padRight truncates, padVersion keeps":  {in: "abcdefgh", width: 5, want: "abcde", wantVersion: "abcdefgh"},
+		"multi-byte counted":                          {in: "héllo", width: 6, want: "héllo ", wantVersion: "héllo "},
+		"multi-byte: padRight cuts, padVersion keeps": {in: "héllo", width: 3, want: "hél", wantVersion: "héllo"},
+		"empty": {in: "", width: 3, want: "   ", wantVersion: "   "},
 	}
 
 	for name, tc := range tests {
@@ -310,8 +311,8 @@ func TestPadRightAndPadVersion(t *testing.T) {
 			if got := padRight(tc.in, tc.width); got != tc.want {
 				t.Fatalf("padRight(%q, %d) = %q, want %q", tc.in, tc.width, got, tc.want)
 			}
-			if got := padVersion(tc.in, tc.width); got != tc.want {
-				t.Fatalf("padVersion(%q, %d) = %q, want %q", tc.in, tc.width, got, tc.want)
+			if got := padVersion(tc.in, tc.width); got != tc.wantVersion {
+				t.Fatalf("padVersion(%q, %d) = %q, want %q", tc.in, tc.width, got, tc.wantVersion)
 			}
 		})
 	}

@@ -40,7 +40,7 @@ const (
 // performs no I/O, so a caller can log or test the exact text; the only
 // environment it consults is the one needed to resolve BannerAuto.
 func FormatBanner(cfg Config, current, latest string) string {
-	title := "   A new version of " + strings.ToUpper(appNameOrRepo(cfg)) + " is available!"
+	title := "   A new version of " + bannerName(cfg) + " is available!"
 	command := "   " + upgradeCommand(cfg)
 
 	if fancyStyle(cfg) {
@@ -81,6 +81,27 @@ func bannerWriter(cfg Config) io.Writer {
 	}
 	return os.Stderr
 }
+
+// bannerName is the tool's name as it appears in the title: uppercased,
+// and elided with an ellipsis when it is long enough to crowd out the
+// rest of the sentence — so "is available!" is never the part that gets
+// clipped by the box's width bound. The ellipsis is ASCII so the plain
+// banner stays plain.
+func bannerName(cfg Config) string {
+	name := strings.ToUpper(appNameOrRepo(cfg))
+
+	// Interior width minus the fixed title text is the room a name may
+	// occupy before it starts eating the sentence around it.
+	const fixed = len("   A new version of ") + len(" is available!")
+	maxName := bannerBoxWidth - fixed
+	if maxName < len(bannerEllipsis)+1 || utf8.RuneCountInString(name) <= maxName {
+		return name
+	}
+	return string([]rune(name)[:maxName-len(bannerEllipsis)]) + bannerEllipsis
+}
+
+// bannerEllipsis marks a name clipped to fit the banner. ASCII on purpose.
+const bannerEllipsis = "..."
 
 // upgradeCommand returns the command the banner tells the user to run.
 func upgradeCommand(cfg Config) string {
@@ -175,7 +196,7 @@ func joinBanner(top, bottom, border, title, command, current, latest string) str
 		"  " + border + empty + border,
 		"  " + row(versions),
 		"  " + border + empty + border,
-		"  " + row("   Upgrade:"),
+		"  " + row("   Update:"),
 		"  " + row(command),
 		"  " + border + empty + border,
 		bottom,
@@ -184,9 +205,15 @@ func joinBanner(top, bottom, border, title, command, current, latest string) str
 	return strings.Join(lines, "\n")
 }
 
-// padVersion pads or truncates a version string to a fixed rune width,
-// so the two version columns line up regardless of encoding.
+// padVersion pads a version string to a minimum column width so the two
+// version columns line up, but never truncates it. A version is data: a
+// silently clipped "v1.2.3-beta." would report a release that does not
+// exist. A pathological length is bounded by the row's own width, not by
+// mangling the number.
 func padVersion(version string, width int) string {
+	if utf8.RuneCountInString(version) >= width {
+		return version
+	}
 	return padRight(version, width)
 }
 
