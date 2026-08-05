@@ -1,0 +1,28 @@
+# Locally compiled example binary (e.g. `go build ./examples/minimal`).
+/minimal
+/examples/minimal/minimal
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Go list output
+go.list
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor and tooling directories
+.idea/
+*.swp
