@@ -1,8 +1,10 @@
 package selfupdate_test
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -292,6 +294,40 @@ func TestInstallVerboseNarratesTheSteps(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("verbose output %q is missing %q", out, want)
 		}
+	}
+}
+
+// TestInstallLogsTheSuccessAtDebugNotInfo pins the quiet-by-default contract: a
+// completed install already reports itself on Stdout and in the returned Result,
+// so it must not also emit an Info line on the default logger and interleave
+// duplicate noise into a CLI's clean output. The structured record survives at
+// Debug for a host that wires a debug logger.
+func TestInstallLogsTheSuccessAtDebugNotInfo(t *testing.T) {
+	release := updatetest.NewReleaseFixture(t, "widget", "1.1.0", "widget", []byte("new binary")).Release
+	target := testutil.WriteTempFile(t, t.TempDir(), "widget", []byte("old binary"), 0o755)
+	cfg, _ := updatetest.QuietConfig(t, &updatetest.StubSource{Release: release}, target)
+
+	// At the default INFO threshold the install confirmation must not appear.
+	var infoBuf bytes.Buffer
+	cfg.Logger = slog.New(slog.NewTextHandler(&infoBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if _, err := selfupdate.Install(t.Context(), cfg, selfupdate.WithForce()); err != nil {
+		t.Fatalf("Install() = %v, want nil", err)
+	}
+	if strings.Contains(infoBuf.String(), "go-selfupdate: installed") {
+		t.Errorf("install logged its confirmation at INFO: %q", infoBuf.String())
+	}
+
+	// A debug logger still receives the structured record, at DEBUG.
+	var debugBuf bytes.Buffer
+	cfg.Logger = slog.New(slog.NewTextHandler(&debugBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	if _, err := selfupdate.Install(t.Context(), cfg, selfupdate.WithForce()); err != nil {
+		t.Fatalf("Install() = %v, want nil", err)
+	}
+	if !strings.Contains(debugBuf.String(), "go-selfupdate: installed") {
+		t.Errorf("debug logger did not receive the install record: %q", debugBuf.String())
+	}
+	if !strings.Contains(debugBuf.String(), "level=DEBUG") {
+		t.Errorf("install record was not emitted at DEBUG: %q", debugBuf.String())
 	}
 }
 

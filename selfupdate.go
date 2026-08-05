@@ -324,7 +324,11 @@ func Install(ctx context.Context, cfg Config, opts ...Option) (Result, error) {
 	result.Updated = true
 	result.AssetName = info.AssetName
 	result.ChecksumSHA256 = installed
-	cfg.Logger.Info("go-selfupdate: installed",
+	// Debug, not Info: the successful install is already reported to the user on
+	// Stdout ("Updating from … / Updated … to …") and returned in Result, so an
+	// Info line on the default logger only interleaves duplicate noise into a CLI's
+	// output. Kept as a structured Debug record for a host that wires a debug logger.
+	cfg.Logger.Debug("go-selfupdate: installed",
 		"binary", cfg.BinaryName, "from", cfg.CurrentVersion, "to", info.LatestVersion, "path", cfg.TargetPath)
 	return result, nil
 }
