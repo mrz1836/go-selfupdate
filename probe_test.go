@@ -46,6 +46,12 @@ func TestProbeInstallDirWritable(t *testing.T) {
 		if !strings.Contains(err.Error(), readOnly) {
 			t.Errorf("error %q does not name the directory %q", err, readOnly)
 		}
+		if !strings.Contains(err.Error(), "~/.local/bin") {
+			t.Errorf("error %q does not point the user at a user-writable directory", err)
+		}
+		if strings.Contains(err.Error(), "sudo") {
+			t.Errorf("error %q suggests sudo; the guidance is deliberately elevation-free", err)
+		}
 	})
 
 	t.Run("missing directory is install-blocking under the same sentinel", func(t *testing.T) {
@@ -69,6 +75,31 @@ func TestProbeInstallDirWritable(t *testing.T) {
 		}
 		if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("stale probe file survived: %v", err)
+		}
+	})
+}
+
+func TestInstallPreflight(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a writable location reports no blocker", func(t *testing.T) {
+		target := filepath.Join(t.TempDir(), "tool")
+		if err := InstallPreflight(Config{TargetPath: target}); err != nil {
+			t.Fatalf("InstallPreflight(writable) = %v, want nil", err)
+		}
+	})
+
+	t.Run("a read-only location is refused with actionable, sudo-free guidance", func(t *testing.T) {
+		testutil.SkipOnWindows(t)
+		testutil.SkipIfRoot(t)
+
+		readOnly, _ := testutil.LockDir(t, t.TempDir())
+		err := InstallPreflight(Config{TargetPath: filepath.Join(readOnly, "tool")})
+		if !errors.Is(err, ErrInstallDirNotWritable) {
+			t.Fatalf("InstallPreflight(read-only) = %v, want ErrInstallDirNotWritable", err)
+		}
+		if !strings.Contains(err.Error(), "~/.local/bin") {
+			t.Errorf("error %q does not point at a user-writable directory", err)
 		}
 	})
 }

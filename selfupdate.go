@@ -114,6 +114,44 @@ func resolveExecPath() (string, error) {
 	return exe, nil
 }
 
+// preflightInstall applies the location guards Install enforces before it
+// writes: it refuses a binary another installer owns, then proves the
+// install directory can be written. It returns the first blocking error —
+// [ErrManagedInstall] or [ErrInstallDirNotWritable] — or nil when an
+// in-place replace can proceed. targetPath must already be resolved.
+func preflightInstall(targetPath string) error {
+	if managed, reason := DetectManaged(targetPath); managed {
+		return fmt.Errorf("%w: %s: %s", ErrManagedInstall, targetPath, reason)
+	}
+	return probeInstallDirWritable(targetPath)
+}
+
+// InstallPreflight reports whether an in-place self-update could proceed
+// from the running binary's location, with no network access and no
+// write. It resolves the target the same way [Install] does, then applies
+// the same location guards, so a caller can warn a user before an update
+// even exists that where the binary lives would block one — a check from a
+// read-only directory otherwise reports "up to date" on a binary Install
+// could never replace.
+//
+// A nil error means the location is fine. A non-nil error is the very one
+// Install would return there: [ErrManagedInstall] for a binary another
+// installer owns, or [ErrInstallDirNotWritable] for a directory the user
+// cannot write. The platform gate and the release lookup are deliberately
+// not run here; this answers only "can the new binary be written where the
+// old one lives?".
+func InstallPreflight(cfg Config) error {
+	target := cfg.TargetPath
+	if target == "" {
+		exe, err := resolveExecPath()
+		if err != nil {
+			return err
+		}
+		target = exe
+	}
+	return preflightInstall(target)
+}
+
 // Info is the read-only result of a version check.
 type Info struct {
 	CurrentVersion  string `json:"current_version"`
@@ -272,11 +310,8 @@ func Install(ctx context.Context, cfg Config, opts ...Option) (Result, error) {
 		return result, nil
 	}
 
-	if managed, reason := DetectManaged(cfg.TargetPath); managed {
-		return result, fmt.Errorf("%w: %s: %s", ErrManagedInstall, cfg.TargetPath, reason)
-	}
-	if probeErr := probeInstallDirWritable(cfg.TargetPath); probeErr != nil {
-		return result, probeErr
+	if preErr := preflightInstall(cfg.TargetPath); preErr != nil {
+		return result, preErr
 	}
 
 	_, _ = fmt.Fprintf(cfg.Stdout, "Updating from %s to %s\n", cfg.CurrentVersion, info.LatestVersion)
