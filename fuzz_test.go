@@ -63,6 +63,12 @@ func FuzzSafeJoin(f *testing.F) {
 
 		{"/", "file.txt"},
 		{".", "file.txt"},
+
+		// A relative dot-dot destDir: "../.." lexically begins with "../",
+		// so a bare prefix check accepts it as "inside" destDir="..". Rel is
+		// what distinguishes containment here.
+		{"..", ".."},
+		{"../a", ".."},
 	}
 	for _, s := range seeds {
 		f.Add(s.destDir, s.name)

@@ -26,13 +26,21 @@ const extractDirPerm os.FileMode = 0o700
 // safeJoin resolves a tar entry name against destDir, rejecting anything
 // that would escape it. This is the Zip-Slip boundary.
 //
-// The guard is a prefix check on the *cleaned* target: once
-// filepath.Clean has resolved every ".." segment, the result must be
-// destDir itself or sit beneath destDir plus a separator. Comparing
-// against the trailing separator rejects both a traversal that Clean
-// resolves outside destDir ("../escape") and a sibling that merely
-// shares destDir as a string prefix ("/tmp/dir-evil" against "/tmp/dir")
-// — the case a naive strings.HasPrefix misses.
+// Containment is decided by filepath.Rel on the *cleaned* target: once
+// filepath.Clean has resolved every ".." segment, the path from destDir
+// down to target must not step above destDir — so its relative form is
+// neither ".." nor anything beginning "../". Rel is correct even when
+// destDir is itself a relative dot-dot path (destDir="..", name=".."
+// yields target="../..", which a bare prefix check waves through because
+// "../.." lexically begins with "../"). In production destDir is always
+// the absolute temp dir from os.MkdirTemp, but this guard must hold for
+// every input, not just the reachable ones.
+//
+// The trailing-separator prefix check is retained as defense in depth and
+// because it is the exact shape the CodeQL go/zipslip sanitizer
+// recognizes: it rejects a sibling that merely shares destDir as a string
+// prefix ("/tmp/dir-evil" against "/tmp/dir"), the case a naive
+// strings.HasPrefix misses.
 func safeJoin(destDir, name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("%w: empty entry name", ErrPathTraversal)
@@ -43,6 +51,11 @@ func safeJoin(destDir, name string) (string, error) {
 
 	destDir = filepath.Clean(destDir)
 	target := filepath.Clean(filepath.Join(destDir, name))
+
+	rel, relErr := filepath.Rel(destDir, target)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("%w: %s", ErrPathTraversal, name)
+	}
 	if target != destDir && !strings.HasPrefix(target, destDir+string(os.PathSeparator)) {
 		return "", fmt.Errorf("%w: %s", ErrPathTraversal, name)
 	}

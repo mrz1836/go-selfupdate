@@ -49,6 +49,16 @@ func TestExtractSafeJoin(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects escape when the destination is itself a relative dot-dot path", func(t *testing.T) {
+		// safeJoin("..", "..") cleans to "../..", which lexically begins
+		// with "../" and so slips past a bare prefix check. filepath.Rel is
+		// what catches it. Production destDir is always absolute, but the
+		// guard has to hold for every input.
+		if _, err := safeJoin("..", ".."); !errors.Is(err, ErrPathTraversal) {
+			t.Errorf("safeJoin(%q, %q) = %v, want ErrPathTraversal", "..", "..", err)
+		}
+	})
+
 	t.Run("rejects windows-shaped absolute entries on every platform", func(t *testing.T) {
 		for _, name := range []string{`\windows\system32\evil.exe`, `C:\windows\evil.exe`} {
 			if _, err := safeJoin(dest, name); !errors.Is(err, ErrPathTraversal) {
