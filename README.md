@@ -25,7 +25,6 @@
        &nbsp;&nbsp;&nbsp;&nbsp; <code>Quality</code> &nbsp;&nbsp;
     </td>
     <td align="left">
-       <a href="https://goreportcard.com/report/github.com/mrz1836/go-selfupdate"><img src="https://goreportcard.com/badge/github.com/mrz1836/go-selfupdate?style=flat-square" alt="Go Report"></a>
        <a href="https://codecov.io/gh/mrz1836/go-selfupdate"><img src="https://codecov.io/gh/mrz1836/go-selfupdate/branch/master/graph/badge.svg?style=flat-square" alt="Coverage"></a>
     </td>
   </tr>
@@ -459,8 +458,7 @@ magex test:race
 
 ## 🧭 Design Notes
 
-Where the implementations this library replaces disagreed, the stronger one won. The
-choices worth knowing about:
+A few decisions shape how this library behaves. The ones worth knowing about:
 
 **Release-binary install only — there is no toolchain fallback.** This is the one decision
 that changes behavior for a tool adopting the library, so it is stated plainly: a `go
