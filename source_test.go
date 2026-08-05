@@ -10,10 +10,34 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/mrz1836/go-selfupdate/internal/testutil"
 )
 
 // errStubRunner is returned by a command runner stubbed to fail.
 var errStubRunner = errors.New("gh is not installed")
+
+// stubSource is a ReleaseSource returning a fixed release or error while
+// counting its calls. It stays local to this white-box file rather than
+// moving to the shared updatetest package: the fallback tests read the
+// call count through the unexported field, and a package importing
+// selfupdate cannot be imported back into a white-box selfupdate test
+// without an import cycle. The shared updatetest.StubSource exposes the
+// same count through a Calls method for every other suite.
+type stubSource struct {
+	release *Release
+	err     error
+	calls   int
+}
+
+// Latest records the call and returns the configured result.
+func (s *stubSource) Latest(context.Context) (*Release, error) {
+	s.calls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.release, nil
+}
 
 // stubRunner returns a commandRunner that yields out and err, recording
 // the arguments it was called with.
@@ -39,6 +63,8 @@ const ghReleaseJSON = `{
 }`
 
 func TestSourceGHLatest(t *testing.T) {
+	t.Parallel()
+
 	t.Run("parses a gh release and targets the right repository", func(t *testing.T) {
 		var captured []string
 		src := NewGHSource("acme", "widget", stubRunner(ghReleaseJSON, nil, &captured))
@@ -91,6 +117,8 @@ func TestSourceGHLatest(t *testing.T) {
 }
 
 func TestSourceAPILatest(t *testing.T) {
+	t.Parallel()
+
 	t.Run("resolves the latest release", func(t *testing.T) {
 		var gotPath, gotAuth string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -196,6 +224,8 @@ func TestSourceAPILatest(t *testing.T) {
 }
 
 func TestSourceFallback(t *testing.T) {
+	t.Parallel()
+
 	apiRelease := &Release{TagName: "v9.9.9"}
 
 	t.Run("the CLI wins when it is present and succeeds", func(t *testing.T) {
@@ -278,6 +308,8 @@ func TestSourceFallback(t *testing.T) {
 }
 
 func TestSourceDefaultCommandRunner(t *testing.T) {
+	t.Parallel()
+
 	t.Run("a missing binary returns an error rather than hanging", func(t *testing.T) {
 		_, err := defaultCommandRunner(t.Context(), "go-selfupdate-no-such-binary-9f3a")
 		if err == nil {
@@ -299,10 +331,6 @@ func TestSourceDefaultCommandRunner(t *testing.T) {
 }
 
 func TestSourceResolveToken(t *testing.T) {
-	env := func(pairs map[string]string) func(string) string {
-		return func(k string) string { return pairs[k] }
-	}
-
 	tests := []struct {
 		name   string
 		envVar string
@@ -349,16 +377,18 @@ func TestSourceResolveToken(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveToken(env(tc.values), tc.envVar); got != tc.want {
-				t.Errorf("resolveToken() = %q, want %q", got, tc.want)
+			t.Parallel()
+
+			if got := ResolveToken(testutil.EnvMap(tc.values), tc.envVar); got != tc.want {
+				t.Errorf("ResolveToken() = %q, want %q", got, tc.want)
 			}
 		})
 	}
 
 	t.Run("a nil getenv falls back to the process environment", func(t *testing.T) {
 		t.Setenv("GITHUB_TOKEN", "from-process")
-		if got := resolveToken(nil, ""); got != "from-process" {
-			t.Errorf("resolveToken(nil, \"\") = %q, want %q", got, "from-process")
+		if got := ResolveToken(nil, ""); got != "from-process" {
+			t.Errorf("ResolveToken(nil, \"\") = %q, want %q", got, "from-process")
 		}
 	})
 }

@@ -1,26 +1,19 @@
 package cobracmd
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	selfupdate "github.com/mrz1836/go-selfupdate"
+	"github.com/mrz1836/go-selfupdate/internal/testutil"
+	"github.com/mrz1836/go-selfupdate/internal/updatetest"
 	"github.com/mrz1836/go-selfupdate/notify"
 	"github.com/spf13/cobra"
 )
@@ -28,96 +21,10 @@ import (
 // errSourceUnavailable stands in for a release lookup that failed.
 var errSourceUnavailable = errors.New("release source unavailable")
 
-// stubSource is a ReleaseSource returning a fixed release, so no test
-// touches the network.
-type stubSource struct {
-	release *selfupdate.Release
-	err     error
-}
-
-// Latest returns the configured release or error.
-func (s *stubSource) Latest(context.Context) (*selfupdate.Release, error) {
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.release, nil
-}
-
 // quietLogger discards the library's install diagnostics so a passing
 // run's output stays readable.
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
-// noEnv is a Getenv seam that reports every variable as unset.
-//
-// It is mandatory for every notifier test in this file: the real
-// environment sets CI on a build agent, and IsDisabled treats CI as an
-// opt-out — so a test reading the process environment would pass
-// locally and assert nothing in CI.
-func noEnv(string) string { return "" }
-
-// makeTarGz builds a gzipped tarball holding one file.
-func makeTarGz(t *testing.T, name string, body []byte) []byte {
-	t.Helper()
-
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-
-	hdr := &tar.Header{
-		Name:     name,
-		Mode:     0o755,
-		Size:     int64(len(body)),
-		Typeflag: tar.TypeReg,
-		ModTime:  time.Unix(0, 0),
-	}
-	if err := tw.WriteHeader(hdr); err != nil {
-		t.Fatalf("write tar header: %v", err)
-	}
-	if _, err := tw.Write(body); err != nil {
-		t.Fatalf("write tar body: %v", err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatalf("close tar writer: %v", err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatalf("close gzip writer: %v", err)
-	}
-	return buf.Bytes()
-}
-
-// releaseFixture serves a release archive and its checksums file, and
-// returns the release pointing at them.
-func releaseFixture(t *testing.T, repo, version, binaryName string, payload []byte) *selfupdate.Release {
-	t.Helper()
-
-	archive := makeTarGz(t, binaryName, payload)
-	assetName := fmt.Sprintf("%s_%s_%s_%s.tar.gz", repo, version, runtime.GOOS, runtime.GOARCH)
-	checksumName := fmt.Sprintf("%s_%s_checksums.txt", repo, version)
-	sum := sha256.Sum256(archive)
-	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), assetName)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/"+assetName, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(archive)
-	})
-	mux.HandleFunc("/"+checksumName, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(checksums))
-	})
-
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-
-	return &selfupdate.Release{
-		TagName: "v" + version,
-		Name:    "v" + version,
-		Body:    "the release notes",
-		Assets: []selfupdate.ReleaseAsset{
-			{Name: assetName, BrowserDownloadURL: srv.URL + "/" + assetName},
-			{Name: checksumName, BrowserDownloadURL: srv.URL + "/" + checksumName},
-		},
-	}
 }
 
 // execute runs cmd with args and returns everything it wrote.
@@ -244,7 +151,7 @@ func TestCheckPerformsNoWrites(t *testing.T) {
 		BinaryName:     "widget",
 		CurrentVersion: "v1.0.0",
 		TargetPath:     target,
-		Source:         &stubSource{release: releaseFixture(t, "widget", "1.2.0", "widget", []byte("the new binary"))},
+		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("the new binary")).Release},
 	})
 
 	out, err := execute(t, cmd, "--check")
@@ -284,7 +191,7 @@ func TestCheckReportsUpToDate(t *testing.T) {
 		BinaryName:     "widget",
 		CurrentVersion: "v1.2.0",
 		TargetPath:     filepath.Join(t.TempDir(), "widget"),
-		Source:         &stubSource{release: releaseFixture(t, "widget", "1.2.0", "widget", []byte("same"))},
+		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("same")).Release},
 	})
 
 	out, err := execute(t, cmd, "--check")
@@ -305,7 +212,7 @@ func TestCheckVerbosePrintsReleaseNotes(t *testing.T) {
 		BinaryName:     "widget",
 		CurrentVersion: "v1.0.0",
 		TargetPath:     filepath.Join(t.TempDir(), "widget"),
-		Source:         &stubSource{release: releaseFixture(t, "widget", "1.2.0", "widget", []byte("new"))},
+		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("new")).Release},
 	})
 
 	out, err := execute(t, cmd, "--check", "--verbose")
@@ -340,7 +247,7 @@ func TestCheckReportsAVersionWithoutAPlatformAsset(t *testing.T) {
 		BinaryName:     "widget",
 		CurrentVersion: "v1.0.0",
 		TargetPath:     filepath.Join(t.TempDir(), "widget"),
-		Source:         &stubSource{release: release},
+		Source:         &updatetest.StubSource{Release: release},
 	})
 
 	out, err := execute(t, cmd, "--check")
@@ -364,7 +271,7 @@ func TestCheckSurfacesSourceFailure(t *testing.T) {
 		BinaryName:     "widget",
 		CurrentVersion: "v1.0.0",
 		TargetPath:     filepath.Join(t.TempDir(), "widget"),
-		Source:         &stubSource{err: errSourceUnavailable},
+		Source:         &updatetest.StubSource{Err: errSourceUnavailable},
 	})
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
@@ -392,7 +299,7 @@ func TestUpdateInstallsRelease(t *testing.T) {
 		BinaryName:     "widget",
 		CurrentVersion: "v1.0.0",
 		TargetPath:     target,
-		Source:         &stubSource{release: releaseFixture(t, "widget", "1.2.0", "widget", []byte("new"))},
+		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("new")).Release},
 		Logger:         quietLogger(),
 	})
 
@@ -431,7 +338,7 @@ func TestUpdateAlreadyCurrentWithoutForce(t *testing.T) {
 		BinaryName:     "widget",
 		CurrentVersion: "v1.2.0",
 		TargetPath:     target,
-		Source:         &stubSource{release: releaseFixture(t, "widget", "1.2.0", "widget", []byte("new"))},
+		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("new")).Release},
 		Logger:         quietLogger(),
 	}
 
@@ -476,7 +383,7 @@ func TestDeprecatedUseBinaryFlagIsHiddenAndInert(t *testing.T) {
 			BinaryName:     "widget",
 			CurrentVersion: "v1.0.0",
 			TargetPath:     filepath.Join(t.TempDir(), "widget"),
-			Source:         &stubSource{release: releaseFixture(t, "widget", "1.2.0", "widget", []byte("new"))},
+			Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("new")).Release},
 		}, WithDeprecatedUseBinaryFlag())
 	}
 
@@ -521,7 +428,7 @@ func TestAttachRegistersCommandAndBanner(t *testing.T) {
 		Repo:           "widget",
 		BinaryName:     "widget",
 		CurrentVersion: "v1.0.0",
-		Source:         &stubSource{release: &selfupdate.Release{TagName: "v1.2.0"}},
+		Source:         &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v1.2.0"}},
 	})
 
 	if cmd == nil || cmd.Use != "update" {
@@ -578,8 +485,8 @@ func bannerConfig(t *testing.T, out *bytes.Buffer, latest string) notify.Config 
 		CacheDir:       t.TempDir(),
 		BannerOut:      out,
 		Style:          notify.BannerASCII,
-		Getenv:         noEnv,
-		Source:         &stubSource{release: &selfupdate.Release{TagName: latest}},
+		Getenv:         testutil.EnvMap(nil),
+		Source:         &updatetest.StubSource{Release: &selfupdate.Release{TagName: latest}},
 	}
 }
 
@@ -636,7 +543,7 @@ func TestAttachBannerSilentDuringUpdate(t *testing.T) {
 		BinaryName:     "widget",
 		CurrentVersion: "v1.0.0",
 		TargetPath:     filepath.Join(t.TempDir(), "widget"),
-		Source:         &stubSource{release: releaseFixture(t, "widget", "1.2.0", "widget", []byte("new"))},
+		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("new")).Release},
 	}))
 	AttachBanner(root, bannerConfig(t, &banner, "v1.2.0"))
 
@@ -696,7 +603,7 @@ func TestAttachBannerPropagatesChainedHookErrors(t *testing.T) {
 	// lookup that writes no cache entry keeps that from racing the
 	// test's own temp-directory cleanup.
 	cfg := bannerConfig(t, &banner, "v1.2.0")
-	cfg.Source = &stubSource{err: errSourceUnavailable}
+	cfg.Source = &updatetest.StubSource{Err: errSourceUnavailable}
 	AttachBanner(root, cfg)
 
 	if _, err := execute(t, root); !errors.Is(err, errSourceUnavailable) {

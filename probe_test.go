@@ -4,12 +4,15 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/mrz1836/go-selfupdate/internal/testutil"
 )
 
 func TestProbeInstallDirWritable(t *testing.T) {
+	t.Parallel()
+
 	t.Run("writable directory passes and leaves nothing behind", func(t *testing.T) {
 		dir := t.TempDir()
 		target := filepath.Join(dir, "tool")
@@ -28,20 +31,10 @@ func TestProbeInstallDirWritable(t *testing.T) {
 	})
 
 	t.Run("read-only directory reports the sentinel and the path", func(t *testing.T) {
-		if runtime.GOOS == "windows" {
-			t.Skip("directory mode bits do not gate creation on windows")
-		}
-		if os.Geteuid() == 0 {
-			t.Skip("root ignores directory permission bits")
-		}
+		testutil.SkipOnWindows(t)
+		testutil.SkipIfRoot(t)
 
-		dir := t.TempDir()
-		readOnly := filepath.Join(dir, "locked")
-		if err := os.Mkdir(readOnly, 0o500); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(readOnly, 0o700) })
-
+		readOnly, _ := testutil.LockDir(t, t.TempDir())
 		target := filepath.Join(readOnly, "tool")
 		err := probeInstallDirWritable(target)
 		if !errors.Is(err, ErrInstallDirNotWritable) {

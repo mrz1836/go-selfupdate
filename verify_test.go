@@ -9,9 +9,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrz1836/go-selfupdate/internal/testutil"
 )
 
 func TestVerifyParseChecksum(t *testing.T) {
+	t.Parallel()
+
 	const asset = "widget_1.0.0_linux_amd64.tar.gz"
 	digest := strings.Repeat("ab", 32)
 
@@ -72,6 +76,8 @@ func TestVerifyParseChecksum(t *testing.T) {
 }
 
 func TestVerifyFetchChecksum(t *testing.T) {
+	t.Parallel()
+
 	const asset = "widget_1.0.0_linux_amd64.tar.gz"
 	digest := strings.Repeat("ef", 32)
 
@@ -102,7 +108,7 @@ func TestVerifyFetchChecksum(t *testing.T) {
 	})
 
 	t.Run("a transport failure surfaces ErrChecksumFetchFailed", func(t *testing.T) {
-		client := &http.Client{Transport: &countingTransport{}}
+		client := &http.Client{Transport: &testutil.CountingTransport{}}
 
 		if _, err := fetchChecksum(t.Context(), client, "https://example.invalid/sums", asset); !errors.Is(err, ErrChecksumFetchFailed) {
 			t.Fatalf("fetchChecksum() = %v, want ErrChecksumFetchFailed", err)
@@ -136,6 +142,8 @@ func TestVerifyFetchChecksum(t *testing.T) {
 }
 
 func TestVerifyDownloadAndVerify(t *testing.T) {
+	t.Parallel()
+
 	payload := []byte("a plausible release archive")
 
 	newServer := func(body []byte, status int) *httptest.Server {
@@ -154,7 +162,7 @@ func TestVerifyDownloadAndVerify(t *testing.T) {
 		srv := newServer(payload, http.StatusOK)
 		dst := filepath.Join(t.TempDir(), "archive.tar.gz")
 
-		if err := downloadAndVerify(t.Context(), srv.Client(), srv.URL, sha256Hex(payload), dst); err != nil {
+		if err := downloadAndVerify(t.Context(), srv.Client(), srv.URL, testutil.SHA256Hex(payload), dst); err != nil {
 			t.Fatalf("downloadAndVerify() = %v, want nil", err)
 		}
 
@@ -171,7 +179,7 @@ func TestVerifyDownloadAndVerify(t *testing.T) {
 		srv := newServer([]byte("tampered contents"), http.StatusOK)
 		dst := filepath.Join(t.TempDir(), "archive.tar.gz")
 
-		err := downloadAndVerify(t.Context(), srv.Client(), srv.URL, sha256Hex(payload), dst)
+		err := downloadAndVerify(t.Context(), srv.Client(), srv.URL, testutil.SHA256Hex(payload), dst)
 		if !errors.Is(err, ErrChecksumMismatch) {
 			t.Fatalf("downloadAndVerify() = %v, want ErrChecksumMismatch", err)
 		}
@@ -184,7 +192,7 @@ func TestVerifyDownloadAndVerify(t *testing.T) {
 		srv := newServer(payload, http.StatusOK)
 		dst := filepath.Join(t.TempDir(), "archive.tar.gz")
 
-		if err := downloadAndVerify(t.Context(), srv.Client(), srv.URL, strings.ToUpper(sha256Hex(payload)), dst); err != nil {
+		if err := downloadAndVerify(t.Context(), srv.Client(), srv.URL, strings.ToUpper(testutil.SHA256Hex(payload)), dst); err != nil {
 			t.Fatalf("downloadAndVerify() = %v, want nil", err)
 		}
 	})
@@ -202,7 +210,7 @@ func TestVerifyDownloadAndVerify(t *testing.T) {
 		srv := newServer(nil, http.StatusInternalServerError)
 		dst := filepath.Join(t.TempDir(), "archive.tar.gz")
 
-		if err := downloadAndVerify(t.Context(), srv.Client(), srv.URL, sha256Hex(payload), dst); !errors.Is(err, ErrDownloadFailed) {
+		if err := downloadAndVerify(t.Context(), srv.Client(), srv.URL, testutil.SHA256Hex(payload), dst); !errors.Is(err, ErrDownloadFailed) {
 			t.Fatalf("downloadAndVerify() = %v, want ErrDownloadFailed", err)
 		}
 	})
@@ -210,7 +218,7 @@ func TestVerifyDownloadAndVerify(t *testing.T) {
 	t.Run("an unreachable host surfaces ErrDownloadFailed", func(t *testing.T) {
 		dst := filepath.Join(t.TempDir(), "archive.tar.gz")
 
-		err := downloadAndVerify(t.Context(), &http.Client{Transport: &countingTransport{}}, "https://example.invalid/a", sha256Hex(payload), dst)
+		err := downloadAndVerify(t.Context(), &http.Client{Transport: &testutil.CountingTransport{}}, "https://example.invalid/a", testutil.SHA256Hex(payload), dst)
 		if !errors.Is(err, ErrDownloadFailed) {
 			t.Fatalf("downloadAndVerify() = %v, want ErrDownloadFailed", err)
 		}
@@ -221,7 +229,7 @@ func TestVerifyDownloadAndVerify(t *testing.T) {
 		srv := newServer(big, http.StatusOK)
 		dst := filepath.Join(t.TempDir(), "archive.tar.gz")
 
-		err := downloadAndVerifyWithCap(t.Context(), srv.Client(), srv.URL, sha256Hex(big), dst, 1024)
+		err := downloadAndVerifyWithCap(t.Context(), srv.Client(), srv.URL, testutil.SHA256Hex(big), dst, 1024)
 		if !errors.Is(err, ErrFileTooLarge) {
 			t.Fatalf("downloadAndVerifyWithCap() = %v, want ErrFileTooLarge", err)
 		}
@@ -235,7 +243,7 @@ func TestVerifyDownloadAndVerify(t *testing.T) {
 		srv := newServer(exact, http.StatusOK)
 		dst := filepath.Join(t.TempDir(), "archive.tar.gz")
 
-		if err := downloadAndVerifyWithCap(t.Context(), srv.Client(), srv.URL, sha256Hex(exact), dst, 1024); err != nil {
+		if err := downloadAndVerifyWithCap(t.Context(), srv.Client(), srv.URL, testutil.SHA256Hex(exact), dst, 1024); err != nil {
 			t.Errorf("downloadAndVerifyWithCap() at exactly the cap = %v, want nil", err)
 		}
 	})
@@ -244,7 +252,7 @@ func TestVerifyDownloadAndVerify(t *testing.T) {
 		srv := newServer(payload, http.StatusOK)
 		dst := filepath.Join(t.TempDir(), "no-such-dir", "archive.tar.gz")
 
-		if err := downloadAndVerify(t.Context(), srv.Client(), srv.URL, sha256Hex(payload), dst); !errors.Is(err, ErrDownloadFailed) {
+		if err := downloadAndVerify(t.Context(), srv.Client(), srv.URL, testutil.SHA256Hex(payload), dst); !errors.Is(err, ErrDownloadFailed) {
 			t.Fatalf("downloadAndVerify() = %v, want ErrDownloadFailed", err)
 		}
 	})

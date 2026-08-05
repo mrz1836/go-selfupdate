@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/mrz1836/go-selfupdate/internal/testutil"
 )
 
 // asciiBanner is the golden ASCII notice for widget v1.0.0 → v1.2.0. It
@@ -141,7 +143,7 @@ func TestShowBannerSilentCases(t *testing.T) {
 			t.Parallel()
 
 			var out bytes.Buffer
-			ShowBanner(Config{AppName: "widget", BannerOut: &out, Getenv: envMap(nil)}, result)
+			ShowBanner(Config{AppName: "widget", BannerOut: &out, Getenv: testutil.EnvMap(nil)}, result)
 			if out.Len() != 0 {
 				t.Fatalf("ShowBanner wrote %q, want silence", out.String())
 			}
@@ -153,7 +155,7 @@ func TestShowBannerWritesToConfiguredStream(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
-	cfg := Config{AppName: "widget", BinaryName: "widget", BannerOut: &out, Getenv: envMap(nil)}
+	cfg := Config{AppName: "widget", BinaryName: "widget", BannerOut: &out, Getenv: testutil.EnvMap(nil)}
 	ShowBanner(cfg, &Result{CurrentVersion: "v1.0.0", LatestVersion: "v1.2.0", UpdateAvailable: true})
 
 	got := out.String()
@@ -210,7 +212,7 @@ func TestUseColor(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg := Config{AppName: "widget", Getenv: envMap(tc.env)}
+			cfg := Config{AppName: "widget", Getenv: testutil.EnvMap(tc.env)}
 			if tc.out == "tty" {
 				dev, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 				if err != nil {

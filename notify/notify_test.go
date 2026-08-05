@@ -8,13 +8,17 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	selfupdate "github.com/mrz1836/go-selfupdate"
+	"github.com/mrz1836/go-selfupdate/internal/testutil"
+	"github.com/mrz1836/go-selfupdate/internal/updatetest"
 )
 
 func TestConfigNormalizeDefaults(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	cfg, err := Config{Owner: "mrz1836", Repo: "widget", CacheDir: dir, Getenv: envMap(nil)}.normalize()
+	cfg, err := Config{Owner: "mrz1836", Repo: "widget", CacheDir: dir, Getenv: testutil.EnvMap(nil)}.normalize()
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
 	}
@@ -68,7 +72,7 @@ func TestConfigNormalizePrefersExplicitFields(t *testing.T) {
 	t.Parallel()
 
 	client := &http.Client{Timeout: time.Second}
-	source := &stubSource{tag: "v9.9.9"}
+	source := &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v9.9.9"}}
 	dir := t.TempDir()
 
 	cfg, err := Config{
@@ -82,7 +86,7 @@ func TestConfigNormalizePrefersExplicitFields(t *testing.T) {
 		Timeout:        2 * time.Second,
 		Client:         client,
 		Source:         source,
-		Getenv:         envMap(nil),
+		Getenv:         testutil.EnvMap(nil),
 	}.normalize()
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
@@ -123,7 +127,7 @@ func TestConfigNormalizeCacheUnavailable(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "")
 
-	_, err := Config{Owner: "mrz1836", Repo: "widget", Getenv: envMap(nil)}.normalize()
+	_, err := Config{Owner: "mrz1836", Repo: "widget", Getenv: testutil.EnvMap(nil)}.normalize()
 	if !errors.Is(err, ErrCacheUnavailable) {
 		t.Fatalf("normalize error = %v, want ErrCacheUnavailable", err)
 	}
@@ -136,7 +140,7 @@ func TestConfigNormalizeDerivesCacheDir(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", base)
 	t.Setenv("HOME", base)
 
-	cfg, err := Config{Owner: "mrz1836", Repo: "widget", Getenv: envMap(nil)}.normalize()
+	cfg, err := Config{Owner: "mrz1836", Repo: "widget", Getenv: testutil.EnvMap(nil)}.normalize()
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
 	}
@@ -193,7 +197,7 @@ func TestResolveToken(t *testing.T) {
 			t.Parallel()
 
 			cfg := tc.cfg
-			cfg.Getenv = envMap(tc.env)
+			cfg.Getenv = testutil.EnvMap(tc.env)
 			if got := resolveToken(cfg); got != tc.want {
 				t.Fatalf("resolveToken() = %q, want %q", got, tc.want)
 			}
@@ -247,7 +251,7 @@ func TestEnvPrefixAndAppSlug(t *testing.T) {
 func TestCheckUsesValidCache(t *testing.T) {
 	t.Parallel()
 
-	source := &stubSource{tag: "v2.0.0"}
+	source := &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v2.0.0"}}
 	cfg := testConfig(t, source)
 
 	if err := WriteCache(cfg, &CacheEntry{CurrentVersion: "v1.0.0", LatestVersion: "v1.5.0"}); err != nil {
@@ -258,8 +262,8 @@ func TestCheckUsesValidCache(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("Check: %v", result.Err)
 	}
-	if source.callCount() != 0 {
-		t.Fatalf("source was called %d times, want 0 for a valid cache", source.callCount())
+	if source.Calls() != 0 {
+		t.Fatalf("source was called %d times, want 0 for a valid cache", source.Calls())
 	}
 	if !result.FromCache {
 		t.Fatal("result should be flagged as coming from the cache")
@@ -275,7 +279,7 @@ func TestCheckUsesValidCache(t *testing.T) {
 func TestCheckFetchesWhenCacheIsStale(t *testing.T) {
 	t.Parallel()
 
-	source := &stubSource{tag: "v2.0.0"}
+	source := &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v2.0.0"}}
 	cfg := testConfig(t, source)
 
 	// Seed an entry stamped a week ago by writing it with an older
@@ -290,8 +294,8 @@ func TestCheckFetchesWhenCacheIsStale(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("Check: %v", result.Err)
 	}
-	if source.callCount() != 1 {
-		t.Fatalf("source was called %d times, want exactly 1", source.callCount())
+	if source.Calls() != 1 {
+		t.Fatalf("source was called %d times, want exactly 1", source.Calls())
 	}
 	if result.FromCache {
 		t.Fatal("a stale cache must not be reported as a cache hit")
@@ -313,7 +317,7 @@ func TestCheckFetchesWhenCacheIsStale(t *testing.T) {
 func TestCheckFreshBypassesValidCache(t *testing.T) {
 	t.Parallel()
 
-	source := &stubSource{tag: "v3.0.0"}
+	source := &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v3.0.0"}}
 	cfg := testConfig(t, source)
 
 	if err := WriteCache(cfg, &CacheEntry{CurrentVersion: "v1.0.0", LatestVersion: "v1.5.0"}); err != nil {
@@ -324,8 +328,8 @@ func TestCheckFreshBypassesValidCache(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("CheckFresh: %v", result.Err)
 	}
-	if source.callCount() != 1 {
-		t.Fatalf("source was called %d times, want exactly 1", source.callCount())
+	if source.Calls() != 1 {
+		t.Fatalf("source was called %d times, want exactly 1", source.Calls())
 	}
 	if result.FromCache || result.LatestVersion != "v3.0.0" {
 		t.Fatalf("result = %+v, want a fresh v3.0.0", result)
@@ -335,7 +339,7 @@ func TestCheckFreshBypassesValidCache(t *testing.T) {
 func TestCheckReportsSourceError(t *testing.T) {
 	t.Parallel()
 
-	source := &stubSource{err: errSource}
+	source := &updatetest.StubSource{Err: errSource}
 	result := Check(t.Context(), testConfig(t, source))
 
 	if !errors.Is(result.Err, errSource) {
@@ -368,7 +372,7 @@ func TestCheckReportsConfigError(t *testing.T) {
 func TestCheckNotNewer(t *testing.T) {
 	t.Parallel()
 
-	source := &stubSource{tag: "v1.0.0"}
+	source := &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v1.0.0"}}
 	result := Check(t.Context(), testConfig(t, source))
 
 	if result.Err != nil {
@@ -384,14 +388,14 @@ func TestCheckNotNewer(t *testing.T) {
 func TestCheckAppliesTimeout(t *testing.T) {
 	t.Parallel()
 
-	source := &stubSource{tag: "v2.0.0"}
+	source := &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v2.0.0"}}
 	cfg := testConfig(t, source)
 	cfg.Timeout = 50 * time.Millisecond
 
 	if result := Check(t.Context(), cfg); result.Err != nil {
 		t.Fatalf("Check: %v", result.Err)
 	}
-	deadline, ok := source.lastContext().Deadline()
+	deadline, ok := source.LastContext().Deadline()
 	if !ok {
 		t.Fatal("the source context carries no deadline")
 	}
@@ -403,7 +407,7 @@ func TestCheckAppliesTimeout(t *testing.T) {
 func TestStartBackgroundCheckReportsAnUpdate(t *testing.T) {
 	t.Parallel()
 
-	source := &stubSource{tag: "v2.0.0"}
+	source := &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v2.0.0"}}
 	result := drain(t, StartBackgroundCheck(t.Context(), testConfig(t, source)))
 
 	if result == nil {
@@ -420,27 +424,27 @@ func TestStartBackgroundCheckReportsAnUpdate(t *testing.T) {
 func TestStartBackgroundCheckStaysSilent(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]func(cfg *Config, source *stubSource){
-		"disabled by the app variable": func(cfg *Config, _ *stubSource) {
-			cfg.Getenv = envMap(map[string]string{"WIDGET_NO_UPDATE_CHECK": "1"})
+	tests := map[string]func(cfg *Config, source *updatetest.StubSource){
+		"disabled by the app variable": func(cfg *Config, _ *updatetest.StubSource) {
+			cfg.Getenv = testutil.EnvMap(map[string]string{"WIDGET_NO_UPDATE_CHECK": "1"})
 		},
-		"disabled by the shared variable": func(cfg *Config, _ *stubSource) {
-			cfg.Getenv = envMap(map[string]string{"NO_UPDATE_CHECK": "true"})
+		"disabled by the shared variable": func(cfg *Config, _ *updatetest.StubSource) {
+			cfg.Getenv = testutil.EnvMap(map[string]string{"NO_UPDATE_CHECK": "true"})
 		},
-		"disabled under CI": func(cfg *Config, _ *stubSource) {
-			cfg.Getenv = envMap(map[string]string{"CI": "true"})
+		"disabled under CI": func(cfg *Config, _ *updatetest.StubSource) {
+			cfg.Getenv = testutil.EnvMap(map[string]string{"CI": "true"})
 		},
-		"development build": func(cfg *Config, _ *stubSource) {
+		"development build": func(cfg *Config, _ *updatetest.StubSource) {
 			cfg.CurrentVersion = "dev"
 		},
-		"unversioned build": func(cfg *Config, _ *stubSource) {
+		"unversioned build": func(cfg *Config, _ *updatetest.StubSource) {
 			cfg.CurrentVersion = ""
 		},
-		"lookup failed": func(_ *Config, source *stubSource) {
-			source.err = errSource
+		"lookup failed": func(_ *Config, source *updatetest.StubSource) {
+			source.Err = errSource
 		},
-		"source panicked": func(_ *Config, source *stubSource) {
-			source.panics = true
+		"source panicked": func(_ *Config, source *updatetest.StubSource) {
+			source.Panic = true
 		},
 	}
 
@@ -448,7 +452,7 @@ func TestStartBackgroundCheckStaysSilent(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := &stubSource{tag: "v2.0.0"}
+			source := &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v2.0.0"}}
 			cfg := testConfig(t, source)
 			mutate(&cfg, source)
 
@@ -465,13 +469,13 @@ func TestStartBackgroundCheckStaysSilent(t *testing.T) {
 func TestStartBackgroundCheckSkipsWorkWhenDisabled(t *testing.T) {
 	t.Parallel()
 
-	source := &stubSource{tag: "v2.0.0"}
+	source := &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v2.0.0"}}
 	cfg := testConfig(t, source)
-	cfg.Getenv = envMap(map[string]string{"WIDGET_NO_UPDATE_CHECK": "1"})
+	cfg.Getenv = testutil.EnvMap(map[string]string{"WIDGET_NO_UPDATE_CHECK": "1"})
 
 	drain(t, StartBackgroundCheck(t.Context(), cfg))
-	if source.callCount() != 0 {
-		t.Fatalf("source was called %d times while disabled, want 0", source.callCount())
+	if source.Calls() != 0 {
+		t.Fatalf("source was called %d times while disabled, want 0", source.Calls())
 	}
 }
 
@@ -480,13 +484,13 @@ func TestStartBackgroundCheckSkipsWorkWhenDisabled(t *testing.T) {
 func TestStartBackgroundCheckIsIgnorable(t *testing.T) {
 	t.Parallel()
 
-	source := &stubSource{tag: "v2.0.0"}
+	source := &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v2.0.0"}}
 	ch := StartBackgroundCheck(t.Context(), testConfig(t, source))
 
 	// Nobody reads ch; the producing goroutine must still finish, which
 	// it proves by closing after the buffered send.
 	deadline := time.After(2 * time.Second)
-	for source.callCount() == 0 {
+	for source.Calls() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("background check never ran")
@@ -503,17 +507,19 @@ func TestIsDevVersion(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]bool{
-		"":       true,
-		"dev":    true,
-		"v":      true,
-		"  dev ": true,
+		"":        true,
+		"dev":     true,
+		"v":       true,
+		"  dev ":  true,
+		"a1b2c3d": true, // a bare commit hash is a dev marker too, so a
+		// from-source build is not nagged every run
 		"v1.0.0": false,
 		"1.0.0":  false,
 		"devel":  false,
 	}
 	for in, want := range cases {
-		if got := isDevVersion(in); got != want {
-			t.Errorf("isDevVersion(%q) = %v, want %v", in, got, want)
+		if got := selfupdate.IsDevVersion(in); got != want {
+			t.Errorf("selfupdate.IsDevVersion(%q) = %v, want %v", in, got, want)
 		}
 	}
 }
@@ -525,7 +531,7 @@ func TestNotifierWiringIsBrief(t *testing.T) {
 	t.Parallel()
 
 	var out strings.Builder
-	cfg := testConfig(t, &stubSource{tag: "v2.0.0"})
+	cfg := testConfig(t, &updatetest.StubSource{Release: &selfupdate.Release{TagName: "v2.0.0"}})
 	cfg.BannerOut = &out
 	cfg.Style = BannerASCII
 

@@ -190,6 +190,33 @@ func FuzzParseChecksum(f *testing.F) {
 	})
 }
 
+// FuzzParseVersionTuple asserts that parseVersionTuple never panics and
+// never returns a negative component. A negative major/minor/patch would
+// let a crafted tag win an ordering it should lose — the same class of bug
+// FuzzCompare guards from the other side.
+func FuzzParseVersionTuple(f *testing.F) {
+	seeds := []string{
+		"1.2.3", "v1.2.3", "  1.0.0 ", "1.2.3-rc1", "1.2.3+build",
+		"1.2", "1.2.3.4", "1.x.3", "", "v", "-1.0.0", "1.-2.3",
+		"99999999999999999999.0.0", "0.0.0", "010.020.030",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, v string) {
+		tuple, err := parseVersionTuple(v)
+		if err != nil {
+			return
+		}
+		for i, n := range tuple {
+			if n < 0 {
+				t.Errorf("SECURITY: parseVersionTuple(%q)[%d] = %d, want >= 0", v, i, n)
+			}
+		}
+	})
+}
+
 // FuzzCompare asserts the ordering invariants of Compare across
 // arbitrary version strings.
 //

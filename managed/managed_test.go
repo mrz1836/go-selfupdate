@@ -24,6 +24,8 @@ func clock(t time.Time) func() time.Time {
 }
 
 func TestNewDrainWindow(t *testing.T) {
+	t.Parallel()
+
 	tests := map[string]struct {
 		bell, closeout string
 		wantBell       int
@@ -46,6 +48,8 @@ func TestNewDrainWindow(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			w, err := NewDrainWindow(tc.bell, tc.closeout)
 			if tc.wantErr {
 				if err == nil {
@@ -70,6 +74,8 @@ func TestNewDrainWindow(t *testing.T) {
 // an overnight window spans midnight, and a naive range check reports
 // "outside" for every minute of the night it was meant to protect.
 func TestDrainWindowContainsWrapping(t *testing.T) {
+	t.Parallel()
+
 	overnight := DrainWindow{BellMin: 19 * 60, CloseoutMin: 4 * 60}
 
 	tests := map[string]struct {
@@ -89,6 +95,8 @@ func TestDrainWindowContainsWrapping(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := overnight.Contains(tc.minute); got != tc.want {
 				t.Fatalf("Contains(%d) = %v, want %v", tc.minute, got, tc.want)
 			}
@@ -97,6 +105,8 @@ func TestDrainWindowContainsWrapping(t *testing.T) {
 }
 
 func TestDrainWindowContainsNonWrapping(t *testing.T) {
+	t.Parallel()
+
 	daytime := DrainWindow{BellMin: 9 * 60, CloseoutMin: 17 * 60}
 
 	tests := map[string]struct {
@@ -116,6 +126,8 @@ func TestDrainWindowContainsNonWrapping(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := daytime.Contains(tc.minute); got != tc.want {
 				t.Fatalf("Contains(%d) = %v, want %v", tc.minute, got, tc.want)
 			}
@@ -124,6 +136,8 @@ func TestDrainWindowContainsNonWrapping(t *testing.T) {
 }
 
 func TestDrainWindowZeroAndString(t *testing.T) {
+	t.Parallel()
+
 	var zero DrainWindow
 	if !zero.IsZero() {
 		t.Fatal("the zero DrainWindow should report IsZero")
@@ -144,6 +158,8 @@ func TestDrainWindowZeroAndString(t *testing.T) {
 }
 
 func TestMinuteOfDay(t *testing.T) {
+	t.Parallel()
+
 	tests := map[string]struct {
 		when time.Time
 		want int
@@ -156,6 +172,8 @@ func TestMinuteOfDay(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := MinuteOfDay(tc.when); got != tc.want {
 				t.Fatalf("MinuteOfDay(%v) = %d, want %d", tc.when, got, tc.want)
 			}
@@ -166,6 +184,8 @@ func TestMinuteOfDay(t *testing.T) {
 // TestRunManagedDefersInsideWindow proves the deferral is a success,
 // not a failure: no upgrade ran, no error came back.
 func TestRunManagedDefersInsideWindow(t *testing.T) {
+	t.Parallel()
+
 	var upgraded, checked bool
 
 	outcome, err := RunManaged(t.Context(), ManagedConfig{
@@ -186,6 +206,8 @@ func TestRunManagedDefersInsideWindow(t *testing.T) {
 }
 
 func TestRunManagedProceedsOutsideWindow(t *testing.T) {
+	t.Parallel()
+
 	var order []string
 	var out bytes.Buffer
 
@@ -215,6 +237,8 @@ func TestRunManagedProceedsOutsideWindow(t *testing.T) {
 // check gets wrong in the other direction: just outside a wrapping
 // window, work must proceed.
 func TestRunManagedOvernightWrapProceeds(t *testing.T) {
+	t.Parallel()
+
 	outcome, err := RunManaged(t.Context(), ManagedConfig{
 		Window:  DrainWindow{BellMin: 19 * 60, CloseoutMin: 4 * 60},
 		Now:     clock(at(4, 1)),
@@ -229,6 +253,8 @@ func TestRunManagedOvernightWrapProceeds(t *testing.T) {
 }
 
 func TestRunManagedUpgradeFailureSkipsHealthCheck(t *testing.T) {
+	t.Parallel()
+
 	var checked bool
 
 	outcome, err := RunManaged(t.Context(), ManagedConfig{
@@ -251,6 +277,8 @@ func TestRunManagedUpgradeFailureSkipsHealthCheck(t *testing.T) {
 }
 
 func TestRunManagedHealthCheckFailureWithoutRollback(t *testing.T) {
+	t.Parallel()
+
 	var out bytes.Buffer
 
 	outcome, err := RunManaged(t.Context(), ManagedConfig{
@@ -274,6 +302,8 @@ func TestRunManagedHealthCheckFailureWithoutRollback(t *testing.T) {
 }
 
 func TestRunManagedHealthCheckFailureRollsBack(t *testing.T) {
+	t.Parallel()
+
 	var rolledBack bool
 	var out bytes.Buffer
 
@@ -301,6 +331,8 @@ func TestRunManagedHealthCheckFailureRollsBack(t *testing.T) {
 }
 
 func TestRunManagedRollbackFailure(t *testing.T) {
+	t.Parallel()
+
 	rollbackErr := errors.New("cannot restore previous binary")
 	var out bytes.Buffer
 
@@ -328,6 +360,8 @@ func TestRunManagedRollbackFailure(t *testing.T) {
 }
 
 func TestRunManagedIncompleteConfig(t *testing.T) {
+	t.Parallel()
+
 	outcome, err := RunManaged(t.Context(), ManagedConfig{Now: clock(at(10, 0))})
 	if !errors.Is(err, ErrManagedConfig) {
 		t.Fatalf("error = %v, want it to wrap ErrManagedConfig", err)
@@ -340,6 +374,8 @@ func TestRunManagedIncompleteConfig(t *testing.T) {
 // TestRunManagedNilHealthCheck covers the caller who deliberately opts
 // out of the tripwire.
 func TestRunManagedNilHealthCheck(t *testing.T) {
+	t.Parallel()
+
 	outcome, err := RunManaged(t.Context(), ManagedConfig{
 		Now:     clock(at(10, 0)),
 		Upgrade: func(context.Context) error { return nil },
@@ -356,6 +392,8 @@ func TestRunManagedNilHealthCheck(t *testing.T) {
 // real clock rather than to the zero time, which would sit at midnight
 // and defer inside every overnight window.
 func TestRunManagedDefaultClock(t *testing.T) {
+	t.Parallel()
+
 	var upgraded bool
 
 	outcome, err := RunManaged(t.Context(), ManagedConfig{
@@ -381,6 +419,8 @@ func windowAround(t time.Time) DrainWindow {
 // TestRunManagedPassesContext proves the caller's context reaches every
 // injected step, so a cancelled supervisor run actually stops.
 func TestRunManagedPassesContext(t *testing.T) {
+	t.Parallel()
+
 	type ctxKey string
 	const key ctxKey = "marker"
 
@@ -414,5 +454,7 @@ func TestRunManagedPassesContext(t *testing.T) {
 // TestNarrateNilWriter covers the discard path explicitly: a nil Stdout
 // is the default for a daemon and must never panic.
 func TestNarrateNilWriter(t *testing.T) {
+	t.Parallel()
+
 	narrate(nil, "dropped")
 }

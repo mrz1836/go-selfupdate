@@ -3,9 +3,13 @@ package selfupdate
 import (
 	"errors"
 	"testing"
+
+	"github.com/mrz1836/go-selfupdate/internal/testutil"
 )
 
 func TestReleaseConvert(t *testing.T) {
+	t.Parallel()
+
 	t.Run("maps every field and reuses the tag as the name", func(t *testing.T) {
 		gh := &ghRelease{
 			TagName:     "v1.2.3",
@@ -47,7 +51,9 @@ func TestReleaseConvert(t *testing.T) {
 }
 
 func TestReleaseSelectAsset(t *testing.T) {
-	platformAsset := ReleaseAsset{Name: currentAssetName("widget", "1.2.3"), BrowserDownloadURL: "https://example.test/platform"}
+	t.Parallel()
+
+	platformAsset := ReleaseAsset{Name: testutil.CurrentAssetName("widget", "1.2.3"), BrowserDownloadURL: "https://example.test/platform"}
 	otherAsset := ReleaseAsset{Name: "widget_1.2.3_plan9_mips.tar.gz", BrowserDownloadURL: "https://example.test/other"}
 
 	t.Run("picks this platform's archive and the exact checksums file", func(t *testing.T) {

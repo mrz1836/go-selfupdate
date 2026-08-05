@@ -3,24 +3,22 @@ package selfupdate
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/mrz1836/go-selfupdate/internal/testutil"
 )
 
-// envFrom returns a getenv function backed by a map.
-func envFrom(pairs map[string]string) func(string) string {
-	return func(k string) string { return pairs[k] }
-}
-
 func TestDetectManagedHomebrew(t *testing.T) {
+	t.Parallel()
+
 	paths := []string{
 		filepath.Join(string(os.PathSeparator), "opt", "homebrew", "Cellar", "widget", "1.2.3", "bin", "widget"),
 		filepath.Join(string(os.PathSeparator), "usr", "local", "Cellar", "widget", "1.2.3", "bin", "widget"),
 	}
 
 	for _, path := range paths {
-		managed, reason := detectManaged(path, envFrom(nil))
+		managed, reason := detectManaged(path, testutil.EnvMap(nil))
 		if !managed {
 			t.Errorf("detectManaged(%q) = false, want true for a Cellar path", path)
 			continue
@@ -32,11 +30,13 @@ func TestDetectManagedHomebrew(t *testing.T) {
 }
 
 func TestDetectManagedGoBin(t *testing.T) {
+	t.Parallel()
+
 	t.Run("GOBIN is recognized", func(t *testing.T) {
 		gobin := t.TempDir()
-		path := writeTempFile(t, gobin, "widget", []byte("binary"), 0o755)
+		path := testutil.WriteTempFile(t, gobin, "widget", []byte("binary"), 0o755)
 
-		managed, reason := detectManaged(path, envFrom(map[string]string{"GOBIN": gobin}))
+		managed, reason := detectManaged(path, testutil.EnvMap(map[string]string{"GOBIN": gobin}))
 		if !managed {
 			t.Fatalf("detectManaged(%q) with GOBIN=%q = false, want true", path, gobin)
 		}
@@ -51,9 +51,9 @@ func TestDetectManagedGoBin(t *testing.T) {
 		if err := os.Mkdir(binDir, 0o700); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
-		path := writeTempFile(t, binDir, "widget", []byte("binary"), 0o755)
+		path := testutil.WriteTempFile(t, binDir, "widget", []byte("binary"), 0o755)
 
-		managed, _ := detectManaged(path, envFrom(map[string]string{"GOPATH": gopath}))
+		managed, _ := detectManaged(path, testutil.EnvMap(map[string]string{"GOPATH": gopath}))
 		if !managed {
 			t.Fatalf("detectManaged(%q) with GOPATH=%q = false, want true", path, gopath)
 		}
@@ -66,10 +66,10 @@ func TestDetectManagedGoBin(t *testing.T) {
 		if err := os.Mkdir(binDir, 0o700); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
-		path := writeTempFile(t, binDir, "widget", []byte("binary"), 0o755)
+		path := testutil.WriteTempFile(t, binDir, "widget", []byte("binary"), 0o755)
 
 		gopath := strings.Join([]string{first, second}, string(os.PathListSeparator))
-		if managed, _ := detectManaged(path, envFrom(map[string]string{"GOPATH": gopath})); !managed {
+		if managed, _ := detectManaged(path, testutil.EnvMap(map[string]string{"GOPATH": gopath})); !managed {
 			t.Fatalf("detectManaged(%q) with a multi-entry GOPATH = false, want true", path)
 		}
 	})
@@ -83,23 +83,22 @@ func TestDetectManagedGoBin(t *testing.T) {
 		if err := os.Mkdir(other, 0o700); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
-		path := writeTempFile(t, other, "widget", []byte("binary"), 0o755)
+		path := testutil.WriteTempFile(t, other, "widget", []byte("binary"), 0o755)
 
-		if managed, reason := detectManaged(path, envFrom(map[string]string{"GOPATH": gopath})); managed {
+		if managed, reason := detectManaged(path, testutil.EnvMap(map[string]string{"GOPATH": gopath})); managed {
 			t.Errorf("detectManaged(%q) = true (%s), want false for a sibling directory", path, reason)
 		}
 	})
 }
 
 func TestDetectManagedNonWritableTarget(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix mode bits are not meaningful on windows")
-	}
+	testutil.SkipOnWindows(t)
+	t.Parallel()
 
 	dir := t.TempDir()
-	path := writeTempFile(t, dir, "widget", []byte("binary"), 0o555)
+	path := testutil.WriteTempFile(t, dir, "widget", []byte("binary"), 0o555)
 
-	managed, reason := detectManaged(path, envFrom(nil))
+	managed, reason := detectManaged(path, testutil.EnvMap(nil))
 	if !managed {
 		t.Fatalf("detectManaged(%q) on a read-only binary = false, want true", path)
 	}
@@ -109,16 +108,18 @@ func TestDetectManagedNonWritableTarget(t *testing.T) {
 }
 
 func TestDetectManagedUnmanaged(t *testing.T) {
-	t.Run("an ordinary writable binary is not managed", func(t *testing.T) {
-		path := writeTempFile(t, t.TempDir(), "widget", []byte("binary"), 0o755)
+	t.Parallel()
 
-		if managed, reason := detectManaged(path, envFrom(map[string]string{"GOBIN": string(os.PathSeparator) + "nowhere"})); managed {
+	t.Run("an ordinary writable binary is not managed", func(t *testing.T) {
+		path := testutil.WriteTempFile(t, t.TempDir(), "widget", []byte("binary"), 0o755)
+
+		if managed, reason := detectManaged(path, testutil.EnvMap(map[string]string{"GOBIN": string(os.PathSeparator) + "nowhere"})); managed {
 			t.Errorf("detectManaged(%q) = true (%s), want false", path, reason)
 		}
 	})
 
 	t.Run("an empty path is not managed", func(t *testing.T) {
-		if managed, _ := detectManaged("", envFrom(nil)); managed {
+		if managed, _ := detectManaged("", testutil.EnvMap(nil)); managed {
 			t.Error(`detectManaged("") = true, want false`)
 		}
 	})
@@ -126,13 +127,13 @@ func TestDetectManagedUnmanaged(t *testing.T) {
 	t.Run("a path that does not exist is not managed", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "absent")
 
-		if managed, reason := detectManaged(path, envFrom(nil)); managed {
+		if managed, reason := detectManaged(path, testutil.EnvMap(nil)); managed {
 			t.Errorf("detectManaged(%q) = true (%s), want false", path, reason)
 		}
 	})
 
 	t.Run("a nil getenv falls back to the process environment", func(t *testing.T) {
-		path := writeTempFile(t, t.TempDir(), "widget", []byte("binary"), 0o755)
+		path := testutil.WriteTempFile(t, t.TempDir(), "widget", []byte("binary"), 0o755)
 
 		if managed, reason := detectManaged(path, nil); managed {
 			t.Errorf("detectManaged(%q, nil) = true (%s), want false", path, reason)
@@ -141,9 +142,8 @@ func TestDetectManagedUnmanaged(t *testing.T) {
 }
 
 func TestDetectManagedFollowsSymlinks(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs elevation on windows")
-	}
+	testutil.SkipOnWindows(t)
+	t.Parallel()
 
 	// Homebrew's real shape: a symlink in <prefix>/bin pointing into the
 	// Cellar. Detection has to follow it, or every Homebrew install looks
@@ -153,7 +153,7 @@ func TestDetectManagedFollowsSymlinks(t *testing.T) {
 	if err := os.MkdirAll(cellar, 0o700); err != nil {
 		t.Fatalf("mkdir cellar: %v", err)
 	}
-	real := writeTempFile(t, cellar, "widget", []byte("binary"), 0o755)
+	real := testutil.WriteTempFile(t, cellar, "widget", []byte("binary"), 0o755)
 
 	binDir := filepath.Join(root, "bin")
 	if err := os.Mkdir(binDir, 0o700); err != nil {
@@ -164,7 +164,7 @@ func TestDetectManagedFollowsSymlinks(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	managed, reason := detectManaged(link, envFrom(nil))
+	managed, reason := detectManaged(link, testutil.EnvMap(nil))
 	if !managed {
 		t.Fatalf("detectManaged(%q) = false, want true after following the symlink", link)
 	}
@@ -174,9 +174,11 @@ func TestDetectManagedFollowsSymlinks(t *testing.T) {
 }
 
 func TestDetectManagedExportedWrapper(t *testing.T) {
+	t.Parallel()
+
 	// The exported entry point must behave like the injected one for a
 	// plainly unmanaged path.
-	path := writeTempFile(t, t.TempDir(), "widget", []byte("binary"), 0o755)
+	path := testutil.WriteTempFile(t, t.TempDir(), "widget", []byte("binary"), 0o755)
 
 	if managed, reason := DetectManaged(path); managed {
 		t.Errorf("DetectManaged(%q) = true (%s), want false", path, reason)

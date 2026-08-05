@@ -3,6 +3,8 @@ package selfupdate
 import "testing"
 
 func TestVersionCompare(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		a    string
@@ -34,6 +36,8 @@ func TestVersionCompare(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := Compare(tc.a, tc.b); got != tc.want {
 				t.Errorf("Compare(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
 			}
@@ -42,6 +46,8 @@ func TestVersionCompare(t *testing.T) {
 }
 
 func TestVersionIsNewer(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		current string
@@ -65,6 +71,8 @@ func TestVersionIsNewer(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := IsNewer(tc.current, tc.latest); got != tc.want {
 				t.Errorf("IsNewer(%q, %q) = %v, want %v", tc.current, tc.latest, got, tc.want)
 			}
@@ -73,6 +81,8 @@ func TestVersionIsNewer(t *testing.T) {
 }
 
 func TestVersionParseTuple(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		in      string
@@ -92,6 +102,8 @@ func TestVersionParseTuple(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := parseVersionTuple(tc.in)
 			if tc.wantErr {
 				if err == nil {
@@ -110,6 +122,8 @@ func TestVersionParseTuple(t *testing.T) {
 }
 
 func TestVersionIsLikelyCommitHash(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		in   string
 		want bool
@@ -128,6 +142,8 @@ func TestVersionIsLikelyCommitHash(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.in, func(t *testing.T) {
+			t.Parallel()
+
 			if got := isLikelyCommitHash(tc.in); got != tc.want {
 				t.Errorf("isLikelyCommitHash(%q) = %v, want %v", tc.in, got, tc.want)
 			}

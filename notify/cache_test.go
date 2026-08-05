@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/mrz1836/go-selfupdate/internal/testutil"
 )
 
 func TestIsDisabled(t *testing.T) {
@@ -67,7 +69,7 @@ func TestIsDisabled(t *testing.T) {
 			t.Parallel()
 
 			cfg := tc.cfg
-			cfg.Getenv = envMap(tc.env)
+			cfg.Getenv = testutil.EnvMap(tc.env)
 			if got := IsDisabled(cfg); got != tc.want {
 				t.Fatalf("IsDisabled() = %v, want %v", got, tc.want)
 			}
@@ -132,7 +134,7 @@ func TestGetCheckInterval(t *testing.T) {
 			t.Parallel()
 
 			cfg := tc.cfg
-			cfg.Getenv = envMap(tc.env)
+			cfg.Getenv = testutil.EnvMap(tc.env)
 			if got := GetCheckInterval(cfg); got != tc.want {
 				t.Fatalf("GetCheckInterval() = %v, want %v", got, tc.want)
 			}
@@ -364,9 +366,7 @@ func TestWriteCacheRenameFailure(t *testing.T) {
 // non-writable cache directory produces — the shape a locked-down or
 // root-owned config directory takes on a shared machine.
 func TestReadOnlyCacheDir(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root, which bypasses directory permissions")
-	}
+	testutil.SkipIfRoot(t)
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -508,7 +508,7 @@ func TestTruthyAndIsCI(t *testing.T) {
 		"1": true, "true": true, "gitlab": true,
 	}
 	for input, want := range ciCases {
-		if got := isCI(envMap(map[string]string{"CI": input})); got != want {
+		if got := isCI(testutil.EnvMap(map[string]string{"CI": input})); got != want {
 			t.Errorf("isCI(CI=%q) = %v, want %v", input, got, want)
 		}
 	}

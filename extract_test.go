@@ -4,12 +4,15 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/mrz1836/go-selfupdate/internal/testutil"
 )
 
 func TestExtractSafeJoin(t *testing.T) {
+	t.Parallel()
+
 	dest := filepath.Join(string(os.PathSeparator), "tmp", "dest")
 
 	t.Run("accepts entries inside the destination", func(t *testing.T) {
@@ -69,6 +72,8 @@ func TestExtractSafeJoin(t *testing.T) {
 }
 
 func TestExtractNormalizeFileMode(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		in   os.FileMode
@@ -94,13 +99,15 @@ func TestExtractNormalizeFileMode(t *testing.T) {
 }
 
 func TestExtractTarGz(t *testing.T) {
+	t.Parallel()
+
 	t.Run("extracts regular files and preserves the tree", func(t *testing.T) {
-		archive := makeTarGz(t,
-			tarEntry{name: "widget", body: []byte("binary")},
-			tarEntry{name: "bin/helper", body: []byte("helper")},
-			tarEntry{name: "README.md", body: []byte("docs"), mode: 0o644},
+		archive := testutil.MakeTarGz(t,
+			testutil.TarEntry{Name: "widget", Body: []byte("binary")},
+			testutil.TarEntry{Name: "bin/helper", Body: []byte("helper")},
+			testutil.TarEntry{Name: "README.md", Body: []byte("docs"), Mode: 0o644},
 		)
-		src := writeTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
+		src := testutil.WriteTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
 		dest := t.TempDir()
 
 		if err := extractTarGz(src, dest); err != nil {
@@ -127,11 +134,11 @@ func TestExtractTarGz(t *testing.T) {
 		// "foo" is a regular file and "foo/bar" then needs "foo" to be a
 		// directory, so MkdirAll fails. A malformed archive like this must
 		// surface an error, not panic or silently drop the entry.
-		archive := makeTarGz(t,
-			tarEntry{name: "foo", body: []byte("i am a file")},
-			tarEntry{name: "foo/bar", body: []byte("nested")},
+		archive := testutil.MakeTarGz(t,
+			testutil.TarEntry{Name: "foo", Body: []byte("i am a file")},
+			testutil.TarEntry{Name: "foo/bar", Body: []byte("nested")},
 		)
-		src := writeTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
+		src := testutil.WriteTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
 		dest := t.TempDir()
 
 		if err := extractTarGz(src, dest); err == nil {
@@ -140,15 +147,13 @@ func TestExtractTarGz(t *testing.T) {
 	})
 
 	t.Run("normalizes modes on extracted files", func(t *testing.T) {
-		if runtime.GOOS == "windows" {
-			t.Skip("unix mode bits are not meaningful on windows")
-		}
+		testutil.SkipOnWindows(t)
 
-		archive := makeTarGz(t,
-			tarEntry{name: "widget", body: []byte("binary"), mode: 0o4777},
-			tarEntry{name: "notes.txt", body: []byte("notes"), mode: 0o666},
+		archive := testutil.MakeTarGz(t,
+			testutil.TarEntry{Name: "widget", Body: []byte("binary"), Mode: 0o4777},
+			testutil.TarEntry{Name: "notes.txt", Body: []byte("notes"), Mode: 0o666},
 		)
-		src := writeTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
+		src := testutil.WriteTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
 		dest := t.TempDir()
 
 		if err := extractTarGz(src, dest); err != nil {
@@ -167,11 +172,11 @@ func TestExtractTarGz(t *testing.T) {
 	})
 
 	t.Run("a traversal entry aborts the whole archive", func(t *testing.T) {
-		archive := makeTarGz(t,
-			tarEntry{name: "widget", body: []byte("legitimate")},
-			tarEntry{name: "../escaped", body: []byte("hostile")},
+		archive := testutil.MakeTarGz(t,
+			testutil.TarEntry{Name: "widget", Body: []byte("legitimate")},
+			testutil.TarEntry{Name: "../escaped", Body: []byte("hostile")},
 		)
-		src := writeTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
+		src := testutil.WriteTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
 		parent := t.TempDir()
 		dest := filepath.Join(parent, "extract")
 		if err := os.Mkdir(dest, 0o700); err != nil {
@@ -188,8 +193,8 @@ func TestExtractTarGz(t *testing.T) {
 	})
 
 	t.Run("an entry larger than the cap is rejected and removed", func(t *testing.T) {
-		archive := makeTarGz(t, tarEntry{name: "widget", body: []byte(strings.Repeat("x", 4096))})
-		src := writeTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
+		archive := testutil.MakeTarGz(t, testutil.TarEntry{Name: "widget", Body: []byte(strings.Repeat("x", 4096))})
+		src := testutil.WriteTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
 		dest := t.TempDir()
 
 		err := extractTarGzWithCap(src, dest, 1024)
@@ -204,14 +209,14 @@ func TestExtractTarGz(t *testing.T) {
 	t.Run("many small entries that exceed the cap in aggregate are rejected", func(t *testing.T) {
 		// Each entry clears the per-file cap comfortably; only the
 		// running total catches this shape of decompression bomb.
-		entries := make([]tarEntry, 0, 8)
+		entries := make([]testutil.TarEntry, 0, 8)
 		for i := range 8 {
-			entries = append(entries, tarEntry{
-				name: "file" + string(rune('a'+i)),
-				body: []byte(strings.Repeat("x", 400)),
+			entries = append(entries, testutil.TarEntry{
+				Name: "file" + string(rune('a'+i)),
+				Body: []byte(strings.Repeat("x", 400)),
 			})
 		}
-		src := writeTempFile(t, t.TempDir(), "a.tar.gz", makeTarGz(t, entries...), 0o600)
+		src := testutil.WriteTempFile(t, t.TempDir(), "a.tar.gz", testutil.MakeTarGz(t, entries...), 0o600)
 
 		err := extractTarGzWithCap(src, t.TempDir(), 1024)
 		if !errors.Is(err, ErrFileTooLarge) {
@@ -220,8 +225,8 @@ func TestExtractTarGz(t *testing.T) {
 	})
 
 	t.Run("an entry sitting exactly at the cap is accepted", func(t *testing.T) {
-		archive := makeTarGz(t, tarEntry{name: "widget", body: []byte(strings.Repeat("x", 1024))})
-		src := writeTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
+		archive := testutil.MakeTarGz(t, testutil.TarEntry{Name: "widget", Body: []byte(strings.Repeat("x", 1024))})
+		src := testutil.WriteTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
 
 		if err := extractTarGzWithCap(src, t.TempDir(), 1024); err != nil {
 			t.Errorf("extractTarGzWithCap() at exactly the cap = %v, want nil", err)
@@ -229,7 +234,7 @@ func TestExtractTarGz(t *testing.T) {
 	})
 
 	t.Run("a non-gzip file is reported, not panicked on", func(t *testing.T) {
-		src := writeTempFile(t, t.TempDir(), "a.tar.gz", []byte("definitely not gzip"), 0o600)
+		src := testutil.WriteTempFile(t, t.TempDir(), "a.tar.gz", []byte("definitely not gzip"), 0o600)
 
 		if err := extractTarGz(src, t.TempDir()); err == nil {
 			t.Fatal("extractTarGz() on a non-gzip file = nil, want an error")
@@ -244,9 +249,11 @@ func TestExtractTarGz(t *testing.T) {
 }
 
 func TestExtractLocateBinary(t *testing.T) {
+	t.Parallel()
+
 	t.Run("finds a binary at the archive root", func(t *testing.T) {
 		dir := t.TempDir()
-		want := writeTempFile(t, dir, "widget", []byte("binary"), 0o755)
+		want := testutil.WriteTempFile(t, dir, "widget", []byte("binary"), 0o755)
 
 		got, err := locateBinary(dir, "widget")
 		if err != nil {
@@ -263,7 +270,7 @@ func TestExtractLocateBinary(t *testing.T) {
 		if err := os.Mkdir(nested, 0o700); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
-		want := writeTempFile(t, nested, "widget", []byte("binary"), 0o755)
+		want := testutil.WriteTempFile(t, nested, "widget", []byte("binary"), 0o755)
 
 		got, err := locateBinary(dir, "widget")
 		if err != nil {
@@ -276,7 +283,7 @@ func TestExtractLocateBinary(t *testing.T) {
 
 	t.Run("finds a windows-suffixed binary", func(t *testing.T) {
 		dir := t.TempDir()
-		want := writeTempFile(t, dir, "widget.exe", []byte("binary"), 0o755)
+		want := testutil.WriteTempFile(t, dir, "widget.exe", []byte("binary"), 0o755)
 
 		got, err := locateBinary(dir, "widget")
 		if err != nil {
@@ -289,7 +296,7 @@ func TestExtractLocateBinary(t *testing.T) {
 
 	t.Run("an absent binary reports ErrBinaryNotFound", func(t *testing.T) {
 		dir := t.TempDir()
-		writeTempFile(t, dir, "README.md", []byte("docs"), 0o644)
+		testutil.WriteTempFile(t, dir, "README.md", []byte("docs"), 0o644)
 
 		if _, err := locateBinary(dir, "widget"); !errors.Is(err, ErrBinaryNotFound) {
 			t.Fatalf("locateBinary() = %v, want ErrBinaryNotFound", err)

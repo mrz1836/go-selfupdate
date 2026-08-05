@@ -6,13 +6,17 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/mrz1836/go-selfupdate/internal/testutil"
 )
 
 func TestInstallBinary(t *testing.T) {
+	t.Parallel()
+
 	t.Run("replaces the target and leaves no staging file", func(t *testing.T) {
 		dir := t.TempDir()
-		src := writeTempFile(t, dir, "new-binary", []byte("version two"), 0o755)
-		dst := writeTempFile(t, dir, "widget", []byte("version one"), 0o755)
+		src := testutil.WriteTempFile(t, dir, "new-binary", []byte("version two"), 0o755)
+		dst := testutil.WriteTempFile(t, dir, "widget", []byte("version one"), 0o755)
 
 		if err := installBinary(src, dst); err != nil {
 			t.Fatalf("installBinary() = %v, want nil", err)
@@ -32,7 +36,7 @@ func TestInstallBinary(t *testing.T) {
 
 	t.Run("installs onto a path that does not exist yet", func(t *testing.T) {
 		dir := t.TempDir()
-		src := writeTempFile(t, dir, "new-binary", []byte("fresh"), 0o755)
+		src := testutil.WriteTempFile(t, dir, "new-binary", []byte("fresh"), 0o755)
 		dst := filepath.Join(dir, "widget")
 
 		if err := installBinary(src, dst); err != nil {
@@ -49,13 +53,11 @@ func TestInstallBinary(t *testing.T) {
 	})
 
 	t.Run("preserves a deliberately restricted target mode", func(t *testing.T) {
-		if runtime.GOOS == "windows" {
-			t.Skip("unix mode bits are not meaningful on windows")
-		}
+		testutil.SkipOnWindows(t)
 
 		dir := t.TempDir()
-		src := writeTempFile(t, dir, "new-binary", []byte("version two"), 0o755)
-		dst := writeTempFile(t, dir, "widget", []byte("version one"), 0o700)
+		src := testutil.WriteTempFile(t, dir, "new-binary", []byte("version two"), 0o755)
+		dst := testutil.WriteTempFile(t, dir, "widget", []byte("version one"), 0o700)
 
 		if err := installBinary(src, dst); err != nil {
 			t.Fatalf("installBinary() = %v, want nil", err)
@@ -74,8 +76,8 @@ func TestInstallBinary(t *testing.T) {
 		// This is the whole reason for rename-over-copy: a running
 		// binary keeps reading the file it started from.
 		dir := t.TempDir()
-		src := writeTempFile(t, dir, "new-binary", []byte("version two"), 0o755)
-		dst := writeTempFile(t, dir, "widget", []byte("version one"), 0o755)
+		src := testutil.WriteTempFile(t, dir, "new-binary", []byte("version two"), 0o755)
+		dst := testutil.WriteTempFile(t, dir, "widget", []byte("version one"), 0o755)
 
 		held, err := os.Open(dst) //nolint:gosec // test-controlled path
 		if err != nil {
@@ -98,7 +100,7 @@ func TestInstallBinary(t *testing.T) {
 
 	t.Run("a missing source fails without disturbing the target", func(t *testing.T) {
 		dir := t.TempDir()
-		dst := writeTempFile(t, dir, "widget", []byte("version one"), 0o755)
+		dst := testutil.WriteTempFile(t, dir, "widget", []byte("version one"), 0o755)
 
 		if err := installBinary(filepath.Join(dir, "absent"), dst); err == nil {
 			t.Fatal("installBinary() with a missing source = nil, want an error")
@@ -117,37 +119,17 @@ func TestInstallBinary(t *testing.T) {
 	})
 
 	t.Run("a read-only directory fails without corrupting the target", func(t *testing.T) {
-		if runtime.GOOS == "windows" {
-			t.Skip("directory mode bits do not gate creation on windows")
-		}
-		if os.Geteuid() == 0 {
-			t.Skip("root ignores directory permission bits")
-		}
+		testutil.SkipOnWindows(t)
+		testutil.SkipIfRoot(t)
 
-		srcDir := t.TempDir()
-		src := writeTempFile(t, srcDir, "new-binary", []byte("version two"), 0o755)
-
-		lockedDir := filepath.Join(t.TempDir(), "locked")
-		if err := os.Mkdir(lockedDir, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		dst := writeTempFile(t, lockedDir, "widget", []byte("version one"), 0o755)
-		if err := os.Chmod(lockedDir, 0o500); err != nil {
-			t.Fatalf("chmod: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o700) })
+		src := testutil.WriteTempFile(t, t.TempDir(), "new-binary", []byte("version two"), 0o755)
+		_, dst := testutil.LockDir(t, t.TempDir())
 
 		if err := installBinary(src, dst); err == nil {
 			t.Fatal("installBinary() into a read-only directory = nil, want an error")
 		}
 
-		got, err := os.ReadFile(dst) //nolint:gosec // test-controlled path
-		if err != nil {
-			t.Fatalf("read target: %v", err)
-		}
-		if string(got) != "version one" {
-			t.Errorf("target = %q, want the original contents intact", got)
-		}
+		testutil.AssertFileContents(t, dst, "locked binary")
 	})
 
 	t.Run("a rename failure is reported and clears the staging file", func(t *testing.T) {
@@ -156,13 +138,13 @@ func TestInstallBinary(t *testing.T) {
 		// branch that fires when the target is a locked running binary
 		// (Windows), so it must return an error and leave no ".new" behind.
 		dir := t.TempDir()
-		src := writeTempFile(t, dir, "new-binary", []byte("version two"), 0o755)
+		src := testutil.WriteTempFile(t, dir, "new-binary", []byte("version two"), 0o755)
 
 		dst := filepath.Join(dir, "occupied")
 		if err := os.Mkdir(dst, 0o755); err != nil {
 			t.Fatalf("mkdir dst: %v", err)
 		}
-		writeTempFile(t, dst, "keep", []byte("resident"), 0o644)
+		testutil.WriteTempFile(t, dst, "keep", []byte("resident"), 0o644)
 
 		if err := installBinary(src, dst); err == nil {
 			t.Fatal("installBinary() renaming over a directory = nil, want an error")
@@ -174,9 +156,11 @@ func TestInstallBinary(t *testing.T) {
 }
 
 func TestInstallCopyFile(t *testing.T) {
+	t.Parallel()
+
 	t.Run("copies content and applies the requested mode", func(t *testing.T) {
 		dir := t.TempDir()
-		src := writeTempFile(t, dir, "src", []byte("payload"), 0o600)
+		src := testutil.WriteTempFile(t, dir, "src", []byte("payload"), 0o600)
 		dst := filepath.Join(dir, "dst")
 
 		if err := copyFile(src, dst, 0o755); err != nil {
@@ -202,8 +186,8 @@ func TestInstallCopyFile(t *testing.T) {
 
 	t.Run("truncates an existing destination rather than appending", func(t *testing.T) {
 		dir := t.TempDir()
-		src := writeTempFile(t, dir, "src", []byte("short"), 0o600)
-		dst := writeTempFile(t, dir, "dst", []byte("a much longer previous body"), 0o600)
+		src := testutil.WriteTempFile(t, dir, "src", []byte("short"), 0o600)
+		dst := testutil.WriteTempFile(t, dir, "dst", []byte("a much longer previous body"), 0o600)
 
 		if err := copyFile(src, dst, 0o644); err != nil {
 			t.Fatalf("copyFile() = %v, want nil", err)

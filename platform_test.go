@@ -8,6 +8,8 @@ import (
 )
 
 func TestPlatformDefaults(t *testing.T) {
+	t.Parallel()
+
 	defaults := DefaultPlatforms()
 	if len(defaults) == 0 {
 		t.Fatal("DefaultPlatforms returned nothing")
@@ -29,6 +31,8 @@ func TestPlatformDefaults(t *testing.T) {
 }
 
 func TestPlatformString(t *testing.T) {
+	t.Parallel()
+
 	if got := (Platform{OS: "linux", Arch: "arm64"}).String(); got != "linux/arm64" {
 		t.Errorf("String() = %q, want %q", got, "linux/arm64")
 	}
@@ -38,6 +42,8 @@ func TestPlatformString(t *testing.T) {
 }
 
 func TestPlatformGuard(t *testing.T) {
+	t.Parallel()
+
 	current := CurrentPlatform()
 
 	t.Run("nil set falls back to the default matrix", func(t *testing.T) {
