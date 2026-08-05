@@ -21,6 +21,13 @@ const apiTimeout = 10 * time.Second
 // are a few hundred bytes.
 const apiErrorBodyLimit = 4096
 
+// apiBodyLimit caps the successful release-metadata response before it is
+// decoded. A release with long notes and many assets is still well under
+// a megabyte; 16 MiB is a generous ceiling that stops a hostile or
+// misconfigured endpoint from OOMing the process with an unbounded 200
+// body — the same fail-closed posture the archive and checksum reads take.
+const apiBodyLimit int64 = 16 << 20
+
 // defaultAPIBaseURL is the public GitHub REST endpoint.
 const defaultAPIBaseURL = "https://api.github.com"
 
@@ -183,7 +190,7 @@ func (a *apiSource) getJSON(ctx context.Context, url string, out any) error {
 		return fmt.Errorf("%w: status %d", ErrGitHubAPIFailed, resp.StatusCode)
 	}
 
-	if derr := json.NewDecoder(resp.Body).Decode(out); derr != nil {
+	if derr := json.NewDecoder(io.LimitReader(resp.Body, apiBodyLimit)).Decode(out); derr != nil {
 		return fmt.Errorf("%w: decode response: %w", ErrGitHubAPIFailed, derr)
 	}
 	return nil

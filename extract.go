@@ -49,15 +49,15 @@ func safeJoin(destDir, name string) (string, error) {
 	return target, nil
 }
 
-// normalizeFileMode strips the setuid, setgid, and sticky bits and
-// collapses the access mode to 0o755 when any execute bit is set and
-// 0o644 otherwise.
+// normalizeFileMode collapses a tar entry's mode to one of exactly two
+// safe values: 0o755 when any execute bit is set, 0o644 otherwise.
 //
-// A release archive has no business carrying an exotic mode. Normalizing
-// means a tampered tarball cannot ship a 0o4777 setuid binary even if it
-// somehow cleared checksum verification.
+// A release archive has no business carrying an exotic mode, so nothing
+// else is ever carried forward. That is the guarantee: a tampered tarball
+// cannot land a setuid, setgid, sticky, or world-writable binary on disk
+// even if it somehow cleared checksum verification, because those bits
+// are simply not among the two modes this can return.
 func normalizeFileMode(mode os.FileMode) os.FileMode {
-	mode &^= os.ModeSetuid | os.ModeSetgid | os.ModeSticky
 	if mode&0o111 != 0 {
 		return 0o755
 	}
@@ -134,6 +134,15 @@ func extractOneFile(tr *tar.Reader, header *tar.Header, dest string, maxBytes in
 	destPath, err := safeJoin(dest, header.Name)
 	if err != nil {
 		return 0, err
+	}
+
+	// Second traversal barrier, at the sink. safeJoin already rejects an
+	// escaping entry, but re-asserting containment in the same function
+	// that opens the file keeps the guarantee local to every filesystem
+	// call below — and it is the exact prefix check the CodeQL go/zipslip
+	// sanitizer recognizes, so a scanner sees the boundary too.
+	if !strings.HasPrefix(destPath, filepath.Clean(dest)+string(os.PathSeparator)) {
+		return 0, fmt.Errorf("%w: %s", ErrPathTraversal, header.Name)
 	}
 
 	if dirErr := os.MkdirAll(filepath.Dir(destPath), extractDirPerm); dirErr != nil {

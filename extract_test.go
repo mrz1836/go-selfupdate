@@ -113,6 +113,22 @@ func TestExtractTarGz(t *testing.T) {
 		}
 	})
 
+	t.Run("reports a corrupt archive that uses a file as a directory", func(t *testing.T) {
+		// "foo" is a regular file and "foo/bar" then needs "foo" to be a
+		// directory, so MkdirAll fails. A malformed archive like this must
+		// surface an error, not panic or silently drop the entry.
+		archive := makeTarGz(t,
+			tarEntry{name: "foo", body: []byte("i am a file")},
+			tarEntry{name: "foo/bar", body: []byte("nested")},
+		)
+		src := writeTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
+		dest := t.TempDir()
+
+		if err := extractTarGz(src, dest); err == nil {
+			t.Fatal("extractTarGz() over a file-used-as-a-directory = nil, want an error")
+		}
+	})
+
 	t.Run("normalizes modes on extracted files", func(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			t.Skip("unix mode bits are not meaningful on windows")
