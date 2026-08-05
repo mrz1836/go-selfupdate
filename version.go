@@ -33,8 +33,10 @@ const (
 //     versions we cannot read is what keeps the library from ever
 //     announcing an upgrade it cannot justify.
 //
-// A leading "v" is ignored, and any prerelease or build suffix (after
-// "-" or "+") is dropped before the numeric comparison.
+// A leading "v" is ignored and build metadata (after "+") never affects
+// ordering. When the numeric tuples are equal, a version carrying a
+// prerelease suffix (after "-") sorts strictly below one without, so a
+// user on v1.2.0-rc2 is correctly offered the final v1.2.0.
 func Compare(a, b string) int {
 	devA, devB := isDevVersion(a), isDevVersion(b)
 	switch {
@@ -62,7 +64,19 @@ func Compare(a, b string) int {
 			return -1
 		}
 	}
-	return 0
+
+	// Equal numeric tuples: apply minimal semver precedence so a
+	// prerelease sorts below the release it leads up to. Build metadata
+	// is ignored, matching the semver spec.
+	preA, preB := hasPrerelease(a), hasPrerelease(b)
+	switch {
+	case preA && !preB:
+		return -1
+	case preB && !preA:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // IsNewer reports whether latest is strictly newer than current. A
@@ -80,18 +94,40 @@ func isDevVersion(v string) bool {
 }
 
 // isLikelyCommitHash reports whether s has the shape of a git commit
-// hash: 7 to 40 hexadecimal characters and nothing else.
+// hash: 7 to 40 hexadecimal characters, at least one of which is a letter.
+//
+// The letter requirement is what keeps a purely numeric version scheme —
+// a bare build number, or CalVer like 20240101 — out of the
+// development-marker branch. Without it, "1234567" would be read as a
+// commit hash and therefore as "older than every release", which turns a
+// real version into a silent downgrade or a missed upgrade. A genuine
+// short or long SHA effectively always contains an a-f digit.
 func isLikelyCommitHash(s string) bool {
 	if len(s) < commitHashMinLen || len(s) > commitHashMaxLen {
 		return false
 	}
+	hasLetter := false
 	for _, c := range s {
-		isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
-		if !isHex {
+		switch {
+		case c >= '0' && c <= '9':
+		case (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'):
+			hasLetter = true
+		default:
 			return false
 		}
 	}
-	return true
+	return hasLetter
+}
+
+// hasPrerelease reports whether v carries a semver prerelease suffix — a
+// "-" segment such as "-rc.1". Build metadata (after "+") is stripped
+// first, because per the semver spec it does not affect precedence.
+func hasPrerelease(v string) bool {
+	clean := strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if plus := strings.IndexByte(clean, '+'); plus >= 0 {
+		clean = clean[:plus]
+	}
+	return strings.IndexByte(clean, '-') >= 0
 }
 
 // parseVersionTuple extracts the major.minor.patch components of a

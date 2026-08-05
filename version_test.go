@@ -15,8 +15,11 @@ func TestVersionCompare(t *testing.T) {
 		{name: "minor newer", a: "1.3.0", b: "1.2.9", want: 1},
 		{name: "patch newer", a: "1.2.4", b: "1.2.3", want: 1},
 		{name: "older", a: "1.2.3", b: "1.2.4", want: -1},
-		{name: "prerelease suffix ignored", a: "1.2.3-rc1", b: "1.2.3", want: 0},
-		{name: "build suffix ignored", a: "1.2.3+build9", b: "1.2.3", want: 0},
+		{name: "prerelease sorts below its release", a: "1.2.3-rc1", b: "1.2.3", want: -1},
+		{name: "release sorts above its prerelease", a: "1.2.3", b: "1.2.3-rc1", want: 1},
+		{name: "two prereleases of one version are unordered", a: "1.2.3-rc1", b: "1.2.3-rc2", want: 0},
+		{name: "build suffix does not affect precedence", a: "1.2.3+build9", b: "1.2.3", want: 0},
+		{name: "prerelease with build metadata still sorts below release", a: "1.2.3-rc1+build9", b: "1.2.3", want: -1},
 		{name: "dev is older than a release", a: "dev", b: "0.0.1", want: -1},
 		{name: "release is newer than dev", a: "0.0.1", b: "dev", want: 1},
 		{name: "empty is a dev marker", a: "", b: "1.0.0", want: -1},
@@ -53,6 +56,11 @@ func TestVersionIsNewer(t *testing.T) {
 		{name: "malformed latest is never newer", current: "1.2.3", latest: "garbage", want: false},
 		{name: "a dev build accepts an unusually tagged release", current: "dev", latest: "2026-08-release", want: true},
 		{name: "v prefixes are ignored", current: "v1.0.0", latest: "v1.0.1", want: true},
+		{name: "a prerelease user is offered the final release", current: "v1.2.0-rc2", latest: "v1.2.0", want: true},
+		{name: "the final release does not re-offer a prerelease", current: "v1.2.0", latest: "v1.2.0-rc2", want: false},
+		// A purely numeric build id must not be read as a dev marker: if it
+		// were, the older 1.0.0 would look "newer" and trigger a downgrade.
+		{name: "a numeric build id never downgrades to an older release", current: "1234567", latest: "1.0.0", want: false},
 	}
 
 	for _, tc := range tests {
@@ -113,6 +121,8 @@ func TestVersionIsLikelyCommitHash(t *testing.T) {
 		{in: "deadbeefg", want: false},
 		{in: "1.2.3", want: false},
 		{in: "", want: false},
+		{in: "1234567", want: false},                                   // all digits: a build number, not a hash
+		{in: "20240101", want: false},                                  // CalVer, not a hash
 		{in: "0123456789abcdef0123456789abcdef012345678", want: false}, // too long
 	}
 
