@@ -2,7 +2,7 @@
 
 # 🔄&nbsp;&nbsp;go-selfupdate
 
-**Self-update and version notifications for Go CLIs — checksum-verified, atomically installed, wired in two calls**
+**Self-update and version notifications for Go CLIs — checksum-verified, atomically installed, wired in one call**
 
 <br/>
 
@@ -97,30 +97,35 @@
 
 ## 🧩 About
 
-**go-selfupdate** is one audited implementation of the feature every CLI ends up writing
-twice: resolve the latest GitHub release, download the right asset, **verify its
-SHA-256**, extract it safely, and atomically replace the running binary — plus the passive
-"a new version is available" banner, and an optional supervised upgrade for a tool that
-runs as a service.
+Every CLI eventually grows a self-updater — and a lot of them grow it *badly*: no checksum,
+a half-written binary after a flaky download, a `../../etc` surprise hiding in a tarball.
+**go-selfupdate** is that feature written once, carefully, so you never have to write it
+again: resolve the latest GitHub release, download the right asset, **verify its SHA-256**,
+extract it safely, and atomically swap the running binary — plus the passive "a new version
+is available" banner, and an optional supervised upgrade for tools that run as a service.
 
 Adopting it is a diff that *deletes* code. A tool with its own updater carries two to five
-hundred lines of release lookup, archive extraction, and binary replacement; the
-replacement is two function calls.
+hundred lines of release lookup, archive extraction, and binary replacement. The
+replacement is one function call.
 
-- **Two-call adoption** — one call registers `update` (and `upgrade`, as an alias) with `--check`, `--force`, and `--verbose`; a second wires the passive "new version available" banner.
-- **Checksum-verified downloads** — every archive is hashed as it streams and matched against the release's `checksums.txt`. A mismatch aborts before anything is written; a release with **no** checksums file is refused, never installed unverified.
-- **Pre-network gates** — an unsupported platform, a binary another installer owns, and a non-writable install directory are each refused *before* a single byte is fetched, so users get a straight answer with no wasted round-trip.
-- **Guarded extraction** — path traversal (`../`) is rejected, file modes are normalized, and a size cap stops a decompression bomb.
-- **Atomic replacement** — write a sibling `<target>.new`, `fsync`, `chmod`, `rename` (with a cross-device copy fallback). The binary is either the old one or the new one, never missing.
-- **Sentinel errors throughout** — every failure mode maps to exactly one `errors.Is`-matchable sentinel, wrapped with the concrete path or asset, so the message alone tells a user what to do next.
-- **Passive, never pushy** — the notice is opt-out, TTL-cached, CI-silent, and swallows every error (including panics), so an update check can never be the reason a command fails.
-- **Supervised upgrades** — the `managed/` sub-package defers inside a caller-supplied drain window, runs a post-upgrade health check, and reports a rollback outcome when it fails — for tools that run as a long-lived service.
-- **Minimal dependency surface** — the core update path imports only the standard library; `cobra` enters only through the optional `cobracmd/` sub-package.
+- **One-call adoption** — `cobracmd.Attach` registers `update` (and `upgrade`, its alias) with `--check`, `--force`, and `--verbose`, *and* wires the passive banner, all from a single config. Drop to `New` + `AttachBanner` when you want the command and the notice configured separately.
+- **Checksum-verified, always** — every archive is hashed as it streams and matched against the release's `checksums.txt`. A mismatch aborts before a single byte reaches your binary; a release with **no** checksums file is refused outright, never installed unverified.
+- **Refuses before it touches the network** — an unsupported platform, a binary another installer owns (Homebrew, `go install`), and a non-writable install directory are each caught *before* anything is downloaded, so the answer is instant and the message says what to do.
+- **Guarded extraction** — path traversal (`../`) is rejected, exotic file modes are normalized away (no setuid surprises), and a size cap defuses a decompression bomb.
+- **Atomic replacement** — stage a sibling `<target>.new`, `fsync` it, `chmod` it, then `rename` it over the target in the same directory. The rename is atomic and a running process keeps working: the binary on disk is always either the old one or the new one, never a half-written nothing.
+- **Errors you can act on** — every failure maps to exactly one `errors.Is`-matchable sentinel, wrapped with the concrete path or asset, so the message alone tells a user their next move.
+- **Passive, never pushy** — the "new version" notice is opt-out, TTL-cached, CI-silent, and swallows every error (including panics). An update check can never be the reason a command fails.
+- **Supervised upgrades** — the `managed/` sub-package defers inside a drain window, runs a post-upgrade health check, and reports a rollback outcome when it fails — for tools that run as a long-lived service.
+- **Almost no dependencies** — the core update path imports only the standard library; `cobra` enters solely through the optional `cobracmd/` sub-package. Pure Go, nothing exotic.
 
-> Why it matters: an unverified self-updater is a remote-code-execution primitive wearing a
-> convenience feature's clothes. go-selfupdate refuses to write anything it has not hashed
-> against a published checksum, and refuses to guess when it cannot — so the one code path
-> that replaces your users' binary is the one path you never have to re-audit per project.
+> **Why it matters:** an unverified self-updater is a remote-code-execution primitive wearing
+> a convenience feature's clothes. go-selfupdate refuses to write anything it has not hashed
+> against a published checksum, and refuses to guess when it can't — so the one code path that
+> replaces your users' binary is the one path you never have to re-audit per project.
+
+> **Platforms:** macOS and Linux get the full self-update today. On Windows, `Check`,
+> `--check`, and the update banner already work; `Install` is **coming soon** — until then it
+> returns a clear message pointing at the releases page instead of failing halfway.
 
 <br/>
 
@@ -142,31 +147,32 @@ go install github.com/mrz1836/mage-x/cmd/magex@latest
 
 ### 1. Wire it into a cobra CLI
 
-Two calls add the whole feature — the active `update` command and the passive banner:
+One call adds the whole feature — the active `update` command **and** the passive banner —
+from a single config:
 
 ```go
 import (
     selfupdate "github.com/mrz1836/go-selfupdate"
     "github.com/mrz1836/go-selfupdate/cobracmd"
-    "github.com/mrz1836/go-selfupdate/notify"
 )
 
-// `widget update` — and `widget upgrade`, registered as an alias —
-// with --check, --force, and --verbose.
-root.AddCommand(cobracmd.New(selfupdate.Config{
+// Registers `widget update` (and `widget upgrade`, its alias) with
+// --check, --force, and --verbose, and wires the "new version available"
+// banner. State the tool's identity once.
+cobracmd.Attach(root, selfupdate.Config{
     Owner:          "acme",
     Repo:           "widget",
     BinaryName:     "widget",
-    CurrentVersion: version,
-}))
-
-// The passive notice, shown after a command succeeds.
-cobracmd.AttachBanner(root, notify.Config{
-    Owner:          "acme",
-    Repo:           "widget",
-    BinaryName:     "widget",
-    CurrentVersion: version,
+    CurrentVersion: version, // usually stamped via -ldflags "-X main.version=..."
 })
+```
+
+Want the command and the banner configured separately — a custom cache directory, a
+different banner stream? Use the two pieces `Attach` is built from:
+
+```go
+root.AddCommand(cobracmd.New(selfupdate.Config{ /* … */ }))
+cobracmd.AttachBanner(root, notify.Config{ /* … */ })
 ```
 
 A complete, buildable program is in [`examples/minimal`](examples/minimal/main.go).
@@ -194,12 +200,17 @@ The order matters, and it is part of the contract:
 4. **Release resolution** — the `gh` CLI first when it is present and authenticated, falling back to the GitHub REST API.
 5. **Checksum-verified download** — the archive is hashed as it streams and compared against the release's `checksums.txt`. A mismatch aborts before anything is written to the install path. A release with no checksums file is refused outright.
 6. **Guarded extraction** — path traversal (`../`) is rejected, file modes are normalized, and a size cap stops a decompression bomb.
-7. **Atomic replace** — write `<target>.new`, `fsync`, `chmod`, `rename`, with a cross-device copy fallback.
+7. **Atomic replace** — stage a sibling `<target>.new`, `fsync`, `chmod`, then `rename` it over the target. The rename is same-directory, so it is atomic and never leaves the command missing (and the running process keeps reading the old inode).
 
 Every stage returns its own sentinel error (`ErrUnsupportedPlatform`, `ErrManagedInstall`,
 `ErrInstallDirNotWritable`, `ErrAssetNotFound`, `ErrChecksumMismatch`, …) wrapped with the
 concrete path or asset that failed, so `errors.Is` works and the message alone tells a user
 what to do next.
+
+> **Windows:** the write path (step 7) needs a rename-aside dance rather than the POSIX
+> atomic rename, so `Install` is gated on Windows for now — it returns `ErrWindowsNotSupported`
+> with a link to the releases page instead of failing halfway through. `Check`, `--check`, and
+> the passive banner work on Windows today; full self-update is coming soon.
 
 <br/>
 
@@ -237,9 +248,11 @@ production default applied on normalization (your `Config` is never mutated):
 | `TokenEnvVar` | none | Consulted before `GITHUB_TOKEN` and `GH_TOKEN`. |
 | `Source` | `gh` CLI, then REST | Any `ReleaseSource` implementation; tests inject a stub. |
 | `Platforms` | linux/darwin/windows × amd64/arm64 | Narrow it when you publish fewer. |
-| `Stdout` | `os.Stdout` | The command wires this to cobra's stream. |
-| `BannerOut` | `os.Stderr` | So a notice never contaminates piped output. |
+| `Stdout` | `os.Stdout` | Progress and the version-transition line; the command wires this to cobra's stream. |
 | `Logger` | `slog.Default()` | |
+
+The passive banner's own stream, cache, and style live on `notify.Config`, not here — the
+two packages keep their configuration separate.
 
 Per-call switches are `Option` values: `WithForce()` installs even when not newer,
 `WithVerbose()` narrates each step, and `WithCheckOnly()` reports what an install would do
@@ -302,8 +315,9 @@ outcome, err := managed.RunManaged(ctx, managed.ManagedConfig{
 
 The core package does not import `managed/`; the dependency runs one way only.
 
-**`cobracmd/` — the drop-in command.** `New` builds the command, `AttachBanner` wires the
-notice. Both are shown in step 1 above.
+**`cobracmd/` — the drop-in command.** `Attach` does both halves in one call; `New` builds
+just the command and `AttachBanner` wires just the notice when you need them apart. All
+three are shown in step 1 above.
 
 </details>
 
@@ -480,7 +494,22 @@ exist at all. Writing a sibling file and renaming it over the target closes that
 binary is either the old one or the new one, never missing.
 
 **Conservative version comparison.** A version that does not parse is treated as *not
-newer*. The failure mode of the alternative is a tool that reinstalls itself forever.
+newer* — the failure mode of the alternative is a tool that reinstalls itself forever. A
+purely numeric string (a build number, CalVer like `20240101`) is a version, not a commit
+hash, so it is never mistaken for a development marker. And when two versions share a
+numeric core, a prerelease sorts below its final release, so someone on `v1.2.0-rc2` is
+correctly offered `v1.2.0`.
+
+**A development build is never replaced without `--force`.** An unstamped build (`dev`, an
+empty version, a bare commit hash) has no version to compare and is usually the machine of
+the person writing the code. `update` reports the release that exists and stops; `--force`
+installs it deliberately.
+
+**Windows self-update is coming soon.** Replacing a running `.exe` on Windows needs a
+rename-aside dance rather than the POSIX atomic rename, so `Install` is gated there for now.
+`Check` and the passive banner already work on Windows, and gating the write path keeps a
+Windows user from a half-finished download that fails at the last step — they get a clear
+pointer to the releases page instead.
 
 **Latest only — no release channels.** No `stable`/`beta`/`edge` selection, because carrying
 channel machinery for projects that only ever publish `x.y.z` is complexity with no caller.
