@@ -17,6 +17,12 @@ import (
 // stalled mirror.
 const downloadTimeout = 5 * time.Minute
 
+// goos is the operating system the install write-path gates on. It is a
+// package variable rather than a direct reference to runtime.GOOS so a
+// test can exercise the Windows gate on any host; production never
+// changes it.
+var goos = runtime.GOOS
+
 // Config wires every external seam the updater depends on. Only Owner,
 // Repo, and BinaryName are required; every other field has a production
 // default applied by normalize.
@@ -68,7 +74,7 @@ func (c Config) normalize() (Config, error) {
 		c.Client = &http.Client{Timeout: downloadTimeout}
 	}
 	if c.Source == nil {
-		token := resolveToken(os.Getenv, c.TokenEnvVar)
+		token := ResolveToken(os.Getenv, c.TokenEnvVar)
 		c.Source = DefaultReleaseSource(c.Owner, c.Repo, nil, c.Client, "", token)
 	}
 	if len(c.Platforms) == 0 {
@@ -233,7 +239,7 @@ func Install(ctx context.Context, cfg Config, opts ...Option) (Result, error) {
 	// the download is skipped entirely and the user is pointed at the
 	// releases page. checkOnly still reports below, and Check plus the
 	// passive banner are unaffected, because those never write.
-	if runtime.GOOS == "windows" && !o.checkOnly {
+	if goos == "windows" && !o.checkOnly {
 		return Result{PreviousVersion: cfg.CurrentVersion},
 			fmt.Errorf("%w; download the latest build from https://github.com/%s/%s/releases/latest",
 				ErrWindowsNotSupported, cfg.Owner, cfg.Repo)
@@ -259,7 +265,7 @@ func Install(ctx context.Context, cfg Config, opts ...Option) (Result, error) {
 	// A development build is never replaced without --force. Its version
 	// is unknown, so every real release outranks it; overwriting the
 	// binary a developer just built, without asking, is the wrong default.
-	if !o.force && isDevVersion(cfg.CurrentVersion) {
+	if !o.force && IsDevVersion(cfg.CurrentVersion) {
 		_, _ = fmt.Fprintf(cfg.Stdout,
 			"%s is a development build (%s); run with --force to install %s\n",
 			cfg.BinaryName, cfg.CurrentVersion, info.LatestVersion)

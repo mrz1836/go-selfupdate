@@ -156,14 +156,7 @@ func GetCheckInterval(cfg Config) time.Duration {
 
 // clampInterval bounds d to the permitted interval range.
 func clampInterval(d time.Duration) time.Duration {
-	switch {
-	case d < minCheckInterval:
-		return minCheckInterval
-	case d > maxCheckInterval:
-		return maxCheckInterval
-	default:
-		return d
-	}
+	return min(max(d, minCheckInterval), maxCheckInterval)
 }
 
 // CachePath returns the cache file's full path, resolving the default

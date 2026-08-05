@@ -39,12 +39,6 @@ import (
 // things to do.
 const defaultCheckTimeout = 10 * time.Second
 
-// devVersion is the conventional version stamped into a build that did
-// not come from a release tag. Such a build is never nagged: it has no
-// meaningful version to compare, and its owner is usually the person
-// writing the code.
-const devVersion = "dev"
-
 // Notifier errors. A caller that only wants the banner can ignore these
 // entirely — every entry point degrades to silence — but a caller
 // wiring the notifier at startup will want to see a configuration
@@ -235,23 +229,13 @@ func tokenEnvVar(cfg Config) string {
 	return envPrefix(cfg.AppName) + "_GITHUB_TOKEN"
 }
 
-// resolveToken returns the first non-empty GitHub token found in the
-// application-specific variable, then GITHUB_TOKEN, then GH_TOKEN.
-//
-// The per-application variable comes first so a tool can scope its own
-// credential without colliding with whatever the surrounding shell
-// already exports.
+// resolveToken returns the first non-empty GitHub token for cfg, applying
+// the shared precedence: the application-specific variable, then
+// GITHUB_TOKEN, then GH_TOKEN. The Config-specific derivation of the
+// application variable stays here; the precedence itself lives in the root
+// package so both halves of the library agree on it.
 func resolveToken(cfg Config) string {
-	getenv := cfg.Getenv
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	for _, name := range []string{tokenEnvVar(cfg), "GITHUB_TOKEN", "GH_TOKEN"} {
-		if v := strings.TrimSpace(getenv(name)); v != "" {
-			return v
-		}
-	}
-	return ""
+	return selfupdate.ResolveToken(cfg.Getenv, tokenEnvVar(cfg))
 }
 
 // Check reports whether a newer release exists, trusting a cache entry
@@ -332,7 +316,7 @@ func StartBackgroundCheck(ctx context.Context, cfg Config) <-chan *Result {
 		// An update check must never be the reason a CLI dies.
 		defer func() { _ = recover() }() //nolint:errcheck // recover's value is deliberately discarded
 
-		if IsDisabled(cfg) || isDevVersion(cfg.CurrentVersion) {
+		if IsDisabled(cfg) || selfupdate.IsDevVersion(cfg.CurrentVersion) {
 			return
 		}
 		if r := Check(ctx, cfg); r != nil && r.Err == nil {
@@ -341,11 +325,4 @@ func StartBackgroundCheck(ctx context.Context, cfg Config) <-chan *Result {
 	}()
 
 	return ch
-}
-
-// isDevVersion reports whether v is a development marker: empty or the
-// literal "dev". Such a build is never nagged.
-func isDevVersion(v string) bool {
-	clean := strings.TrimPrefix(strings.TrimSpace(v), "v")
-	return clean == "" || clean == devVersion
 }

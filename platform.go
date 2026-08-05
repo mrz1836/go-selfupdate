@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"fmt"
 	"runtime"
+	"slices"
 )
 
 // Platform is one GOOS/GOARCH pair a caller publishes release assets
@@ -53,10 +54,8 @@ func guardPlatform(supported []Platform) error {
 	}
 
 	current := CurrentPlatform()
-	for _, p := range supported {
-		if p.OS == current.OS && p.Arch == current.Arch {
-			return nil
-		}
+	if slices.Contains(supported, current) {
+		return nil
 	}
 	return fmt.Errorf("%w: %s", ErrUnsupportedPlatform, current)
 }

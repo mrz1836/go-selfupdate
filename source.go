@@ -31,6 +31,13 @@ const apiBodyLimit int64 = 16 << 20
 // defaultAPIBaseURL is the public GitHub REST endpoint.
 const defaultAPIBaseURL = "https://api.github.com"
 
+// drainErrorBody discards a bounded slice of a non-200 response body so
+// the connection can return to the pool, without inviting an unbounded
+// read from a hostile or misconfigured endpoint.
+func drainErrorBody(body io.Reader) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, apiErrorBodyLimit))
+}
+
 // ReleaseSource is the seam between the update driver and whatever
 // actually produces release metadata. Two implementations ship here: one
 // that shells out to the `gh` CLI and one that talks to the GitHub REST
@@ -54,17 +61,21 @@ func defaultCommandRunner(ctx context.Context, name string, args ...string) ([]b
 	return exec.CommandContext(ctx, name, args...).Output() //nolint:gosec // name is always "gh"; args are built from Config, never from remote input
 }
 
-// resolveToken returns the first non-empty GitHub token found in the
-// caller's preferred variable, then GITHUB_TOKEN, then GH_TOKEN.
+// ResolveToken returns the first non-empty GitHub token found in
+// preferredEnvVar, then GITHUB_TOKEN, then GH_TOKEN. Values are
+// whitespace-trimmed, and an empty preferredEnvVar is skipped rather than
+// consulted. A nil getenv falls back to [os.Getenv].
 //
-// The per-application variable comes first so a tool can scope its own
-// credential (say FLYWHEEL_GITHUB_TOKEN) without colliding with whatever
-// the surrounding shell already exports.
-func resolveToken(getenv func(string) string, tokenEnvVar string) string {
+// The per-application variable is consulted first so a tool can scope its
+// own credential (say FLYWHEEL_GITHUB_TOKEN) without colliding with
+// whatever the surrounding shell already exports. Both this package and
+// the passive notifier resolve tokens through this one function, so the
+// precedence a consumer sees is identical wherever a token is read.
+func ResolveToken(getenv func(string) string, preferredEnvVar string) string {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	names := []string{tokenEnvVar, "GITHUB_TOKEN", "GH_TOKEN"}
+	names := []string{preferredEnvVar, "GITHUB_TOKEN", "GH_TOKEN"}
 	for _, name := range names {
 		if name == "" {
 			continue
@@ -186,7 +197,7 @@ func (a *apiSource) getJSON(ctx context.Context, url string, out any) error {
 	if resp.StatusCode != http.StatusOK {
 		// Drain a bounded slice of the body so the connection stays
 		// reusable without inviting an unbounded read.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, apiErrorBodyLimit))
+		drainErrorBody(resp.Body)
 		return fmt.Errorf("%w: status %d", ErrGitHubAPIFailed, resp.StatusCode)
 	}
 

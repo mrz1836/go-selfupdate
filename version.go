@@ -38,7 +38,7 @@ const (
 // prerelease suffix (after "-") sorts strictly below one without, so a
 // user on v1.2.0-rc2 is correctly offered the final v1.2.0.
 func Compare(a, b string) int {
-	devA, devB := isDevVersion(a), isDevVersion(b)
+	devA, devB := IsDevVersion(a), IsDevVersion(b)
 	switch {
 	case devA && devB:
 		return 0
@@ -85,10 +85,16 @@ func IsNewer(current, latest string) bool {
 	return Compare(latest, current) > 0
 }
 
-// isDevVersion reports whether v is a development marker: empty, the
+// IsDevVersion reports whether v is a development marker: empty, the
 // literal "dev", or a bare commit hash. All three sort below any real
-// release.
-func isDevVersion(v string) bool {
+// release, so a from-source build is never mistaken for one that outranks
+// a published tag.
+//
+// It is exported because the marker semantics are already a public
+// contract behind [Compare] and [IsNewer]: a caller that wants to gate a
+// prompt or a passive notice on "is this a real release?" should answer
+// the question the same way the ordering does, rather than re-deriving it.
+func IsDevVersion(v string) bool {
 	clean := strings.TrimPrefix(strings.TrimSpace(v), "v")
 	return clean == "" || clean == devVersion || isLikelyCommitHash(clean)
 }

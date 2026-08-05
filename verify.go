@@ -52,7 +52,7 @@ func fetchChecksum(ctx context.Context, client *http.Client, checksumURL, assetN
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, apiErrorBodyLimit))
+		drainErrorBody(resp.Body)
 		return "", fmt.Errorf("%w: status %d", ErrChecksumFetchFailed, resp.StatusCode)
 	}
 
@@ -133,7 +133,7 @@ func downloadAndVerifyWithCap(ctx context.Context, client *http.Client, url, exp
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, apiErrorBodyLimit))
+		drainErrorBody(resp.Body)
 		return fmt.Errorf("%w: status %d", ErrDownloadFailed, resp.StatusCode)
 	}
 
