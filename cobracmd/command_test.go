@@ -317,6 +317,44 @@ func TestCheckVerbosePrintsReleaseNotes(t *testing.T) {
 	}
 }
 
+// TestCheckReportsAVersionWithoutAPlatformAsset pins the promise that
+// --check still names the available version when the release simply has
+// no build for this platform, pointing the user at the release page
+// rather than dead-ending on a bare "asset not found" error.
+func TestCheckReportsAVersionWithoutAPlatformAsset(t *testing.T) {
+	t.Parallel()
+
+	// A release that publishes only a checksums file — no archive for the
+	// running GOOS/GOARCH — so selectAsset yields ErrAssetNotFound.
+	release := &selfupdate.Release{
+		TagName: "v1.2.0",
+		HTMLURL: "https://github.com/acme/widget/releases/tag/v1.2.0",
+		Assets: []selfupdate.ReleaseAsset{
+			{Name: "widget_1.2.0_checksums.txt", BrowserDownloadURL: "https://example.test/checksums"},
+		},
+	}
+
+	cmd := New(selfupdate.Config{
+		Owner:          "acme",
+		Repo:           "widget",
+		BinaryName:     "widget",
+		CurrentVersion: "v1.0.0",
+		TargetPath:     filepath.Join(t.TempDir(), "widget"),
+		Source:         &stubSource{release: release},
+	})
+
+	out, err := execute(t, cmd, "--check")
+	if err != nil {
+		t.Fatalf("execute --check = %v, want the missing asset reported, not errored", err)
+	}
+	if !strings.Contains(out, "v1.2.0") {
+		t.Errorf("output = %q, want the available version named", out)
+	}
+	if !strings.Contains(out, release.HTMLURL) {
+		t.Errorf("output = %q, want a pointer to the release page", out)
+	}
+}
+
 func TestCheckSurfacesSourceFailure(t *testing.T) {
 	t.Parallel()
 
@@ -370,7 +408,7 @@ func TestUpdateInstallsRelease(t *testing.T) {
 	if string(installed) != "new" {
 		t.Errorf("installed binary = %q, want the release payload", installed)
 	}
-	if !strings.Contains(out, "Upgrading from v1.0.0 to v1.2.0") {
+	if !strings.Contains(out, "Updating from v1.0.0 to v1.2.0") {
 		t.Errorf("output = %q, want the version transition line", out)
 	}
 	if !strings.Contains(out, "Updated widget to v1.2.0") {
@@ -468,6 +506,49 @@ func TestDeprecatedUseBinaryFlagIsHiddenAndInert(t *testing.T) {
 	}
 	if withFlag != withoutFlag {
 		t.Errorf("--use-binary changed behavior:\nwith:    %q\nwithout: %q", withFlag, withoutFlag)
+	}
+}
+
+// TestAttachRegistersCommandAndBanner covers the one-call adoption path:
+// Attach both registers the update command on root and wires the passive
+// banner hook, from a single Config.
+func TestAttachRegistersCommandAndBanner(t *testing.T) {
+	t.Parallel()
+
+	root := &cobra.Command{Use: "widget"}
+	cmd := Attach(root, selfupdate.Config{
+		Owner:          "acme",
+		Repo:           "widget",
+		BinaryName:     "widget",
+		CurrentVersion: "v1.0.0",
+		Source:         &stubSource{release: &selfupdate.Release{TagName: "v1.2.0"}},
+	})
+
+	if cmd == nil || cmd.Use != "update" {
+		t.Fatalf("Attach returned %v, want the update command", cmd)
+	}
+	registered := false
+	for _, c := range root.Commands() {
+		if c == cmd {
+			registered = true
+		}
+	}
+	if !registered {
+		t.Error("Attach did not register the command on root")
+	}
+	if root.PersistentPreRunE == nil {
+		t.Error("Attach did not wire the passive banner hook")
+	}
+}
+
+// TestAttachNilRootStillBuildsTheCommand guards the caller mistake of a
+// nil root: Attach must not panic and still returns a usable command.
+func TestAttachNilRootStillBuildsTheCommand(t *testing.T) {
+	t.Parallel()
+
+	cmd := Attach(nil, selfupdate.Config{Owner: "acme", Repo: "widget", BinaryName: "widget"})
+	if cmd == nil || cmd.Use != "update" {
+		t.Fatalf("Attach(nil, ...) = %v, want the update command", cmd)
 	}
 }
 

@@ -32,7 +32,9 @@ package cobracmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -175,6 +177,35 @@ func New(cfg selfupdate.Config, opts ...CmdOption) *cobra.Command {
 	return cmd
 }
 
+// Attach is the one-call adoption path: it registers the update command
+// on root and wires the passive "a new version is available" banner, both
+// derived from a single [selfupdate.Config], so a tool states its
+// identity — owner, repo, binary name, version — exactly once.
+//
+// It is precisely [New] + root.AddCommand + [AttachBanner], with the
+// notifier's identity, release source, HTTP client, and token variable
+// carried over from the same Config. Reach for New and AttachBanner
+// directly when the command and the banner must differ — a separate cache
+// directory, a custom banner stream, a different upgrade command string;
+// Attach covers the common case where they do not. The registered command
+// is returned for any further adjustment.
+func Attach(root *cobra.Command, cfg selfupdate.Config, opts ...CmdOption) *cobra.Command {
+	cmd := New(cfg, opts...)
+	if root != nil {
+		root.AddCommand(cmd)
+	}
+	AttachBanner(root, notify.Config{
+		Owner:          cfg.Owner,
+		Repo:           cfg.Repo,
+		BinaryName:     cfg.BinaryName,
+		CurrentVersion: cfg.CurrentVersion,
+		Source:         cfg.Source,
+		Client:         cfg.Client,
+		TokenEnvVar:    cfg.TokenEnvVar,
+	})
+	return cmd
+}
+
 // defaultAliases returns the counterpart spelling of use, so a tool gets
 // both "update" and "upgrade" without asking.
 func defaultAliases(use string) []string {
@@ -252,6 +283,13 @@ func runUpdate(cmd *cobra.Command, cfg selfupdate.Config) error {
 func reportCheck(ctx context.Context, cmd *cobra.Command, cfg selfupdate.Config, verbose bool) error {
 	info, err := selfupdate.Check(ctx, cfg)
 	if err != nil {
+		// Check returns a populated Info alongside ErrAssetNotFound: a
+		// newer release exists, this platform just has nothing to
+		// download. Report the version and point at the releases page
+		// rather than dead-ending on a bare error.
+		if errors.Is(err, selfupdate.ErrAssetNotFound) && info != nil && info.LatestVersion != "" {
+			return reportMissingAsset(cfg.Stdout, cfg, info)
+		}
 		return err
 	}
 
@@ -264,8 +302,28 @@ func reportCheck(ctx context.Context, cmd *cobra.Command, cfg selfupdate.Config,
 	_, _ = fmt.Fprintf(out, "A new version of %s is available: %s -> %s\n",
 		displayName(cfg), info.CurrentVersion, info.LatestVersion)
 	_, _ = fmt.Fprintf(out, "Run %q to install it.\n", cmd.CommandPath())
-	if verbose && info.ReleaseNotes != "" {
-		_, _ = fmt.Fprintf(out, "\nRelease notes for %s:\n%s\n", info.LatestVersion, info.ReleaseNotes)
+	if verbose {
+		if info.ReleaseURL != "" {
+			_, _ = fmt.Fprintf(out, "Release: %s\n", info.ReleaseURL)
+		}
+		if info.ReleaseNotes != "" {
+			_, _ = fmt.Fprintf(out, "\nRelease notes for %s:\n%s\n", info.LatestVersion, info.ReleaseNotes)
+		}
+	}
+	return nil
+}
+
+// reportMissingAsset renders the "a newer release exists, but not for
+// your platform" case: name the version, then send the user somewhere
+// they can act — the release page when known, the releases list otherwise.
+func reportMissingAsset(out io.Writer, cfg selfupdate.Config, info *selfupdate.Info) error {
+	_, _ = fmt.Fprintf(out, "A new version of %s is available: %s -> %s\n",
+		displayName(cfg), info.CurrentVersion, info.LatestVersion)
+	_, _ = fmt.Fprintf(out, "This release has no prebuilt binary for %s. ", selfupdate.CurrentPlatform())
+	if info.ReleaseURL != "" {
+		_, _ = fmt.Fprintf(out, "Download it from %s\n", info.ReleaseURL)
+	} else {
+		_, _ = fmt.Fprintln(out, "Check the project's releases page.")
 	}
 	return nil
 }
