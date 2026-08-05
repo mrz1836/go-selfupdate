@@ -23,6 +23,14 @@ var (
 	ErrUnsupportedPlatform = errors.New("go-selfupdate: unsupported platform")
 	ErrBinaryNotFound      = errors.New("go-selfupdate: binary not found in extracted files")
 
+	// ErrWindowsNotSupported is returned when Install runs on Windows,
+	// where replacing the running .exe needs a rename-aside dance this
+	// library does not yet implement. Read-only paths (Check and the
+	// passive banner) work on Windows; only the write path is gated, and
+	// the wrapped message points the user at the releases page. Support is
+	// planned, so this is a "not yet" rather than a permanent refusal.
+	ErrWindowsNotSupported = errors.New("go-selfupdate: self-update is not available on Windows yet")
+
 	// Download / network errors.
 	ErrDownloadFailed = errors.New("go-selfupdate: download failed")
 

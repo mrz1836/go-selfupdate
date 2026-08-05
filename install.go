@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // installFilePerm is the fallback mode for a freshly installed binary
@@ -52,12 +53,31 @@ func installBinary(src, dst string) error {
 		return fmt.Errorf("go-selfupdate: install binary at %s: %w", dst, renErr)
 	}
 
-	// Re-apply the mode after the rename: some network filesystems drop
-	// permission bits on create.
-	if chmodErr := os.Chmod(dst, mode); chmodErr != nil {
-		return fmt.Errorf("go-selfupdate: chmod installed binary at %s: %w", dst, chmodErr)
-	}
+	// The new binary is in place. copyFile already applied the mode to the
+	// staging file before the rename, so this re-chmod is belt-and-braces
+	// for a network filesystem that drops permission bits on create — a
+	// failure here must never report a completed install as failed, so it
+	// is best-effort.
+	_ = os.Chmod(dst, mode)
+
+	// Flush the directory entry so which name points at which inode is
+	// durable across a power loss, not just the file contents (already
+	// fsynced by copyFile). Best-effort: not every filesystem supports it.
+	syncDir(filepath.Dir(dst))
 	return nil
+}
+
+// syncDir best-effort fsyncs a directory so a completed rename survives a
+// crash. Errors are ignored: some platforms and filesystems do not
+// support syncing a directory handle, and a durability nicety must never
+// turn a successful install into a reported failure.
+func syncDir(dir string) {
+	d, err := os.Open(dir) //nolint:gosec // dir is the resolved install target's own directory
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
 }
 
 // copyFile copies src to dst with the given mode, fsyncing before close

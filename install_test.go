@@ -149,6 +149,28 @@ func TestInstallBinary(t *testing.T) {
 			t.Errorf("target = %q, want the original contents intact", got)
 		}
 	})
+
+	t.Run("a rename failure is reported and clears the staging file", func(t *testing.T) {
+		// Staging succeeds but the rename cannot land: dst is a non-empty
+		// directory, which no file can be renamed over. This is the exact
+		// branch that fires when the target is a locked running binary
+		// (Windows), so it must return an error and leave no ".new" behind.
+		dir := t.TempDir()
+		src := writeTempFile(t, dir, "new-binary", []byte("version two"), 0o755)
+
+		dst := filepath.Join(dir, "occupied")
+		if err := os.Mkdir(dst, 0o755); err != nil {
+			t.Fatalf("mkdir dst: %v", err)
+		}
+		writeTempFile(t, dst, "keep", []byte("resident"), 0o644)
+
+		if err := installBinary(src, dst); err == nil {
+			t.Fatal("installBinary() renaming over a directory = nil, want an error")
+		}
+		if _, statErr := os.Stat(dst + ".new"); !errors.Is(statErr, os.ErrNotExist) {
+			t.Error("a failed rename left the staging file behind")
+		}
+	})
 }
 
 func TestInstallCopyFile(t *testing.T) {

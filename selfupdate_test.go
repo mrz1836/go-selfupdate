@@ -208,8 +208,51 @@ func TestInstallReplacesTheBinary(t *testing.T) {
 		t.Errorf("target = %q, want the new binary", body)
 	}
 
-	if !strings.Contains(out.String(), "Upgrading from v1.0.0 to v1.1.0") {
+	if !strings.Contains(out.String(), "Updating from v1.0.0 to v1.1.0") {
 		t.Errorf("stdout %q is missing the version transition line", out)
+	}
+}
+
+func TestInstallRefusesADevelopmentBuildWithoutForce(t *testing.T) {
+	release, _ := releaseFixture(t, "widget", "1.2.0", "widget", []byte("new binary"))
+	target := writeTempFile(t, t.TempDir(), "widget", []byte("dev binary"), 0o755)
+	cfg, out := quietConfig(t, &stubSource{release: release}, target)
+	cfg.CurrentVersion = devVersion
+
+	// Without --force, the developer's own build is left in place, with an
+	// explanation rather than a silent overwrite.
+	result, err := Install(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("Install() = %v, want nil", err)
+	}
+	if result.Updated {
+		t.Error("a development build was replaced without --force")
+	}
+	body, err := os.ReadFile(target) //nolint:gosec // test-controlled path
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(body) != "dev binary" {
+		t.Errorf("target = %q, want the development build untouched", body)
+	}
+	if !strings.Contains(out.String(), "development build") {
+		t.Errorf("stdout = %q, want it to explain the dev build was kept", out.String())
+	}
+
+	// --force installs over it deliberately.
+	forced, err := Install(t.Context(), cfg, WithForce())
+	if err != nil {
+		t.Fatalf("Install(--force) = %v, want nil", err)
+	}
+	if !forced.Updated {
+		t.Error("--force did not install over the development build")
+	}
+	body, err = os.ReadFile(target) //nolint:gosec // test-controlled path
+	if err != nil {
+		t.Fatalf("read target after --force: %v", err)
+	}
+	if string(body) != "new binary" {
+		t.Errorf("target = %q, want the release payload after --force", body)
 	}
 }
 
@@ -283,7 +326,7 @@ func TestInstallCheckOnlyWritesNothing(t *testing.T) {
 	if string(body) != "old binary" {
 		t.Errorf("check-only rewrote the target: %q", body)
 	}
-	if strings.Contains(out.String(), "Upgrading from") {
+	if strings.Contains(out.String(), "Updating from") {
 		t.Errorf("check-only announced an upgrade it did not perform: %q", out)
 	}
 }
@@ -435,9 +478,6 @@ func TestConfigNormalizeFillsDefaults(t *testing.T) {
 	}
 	if got.Stdout != os.Stdout {
 		t.Error("normalize did not default Stdout to os.Stdout")
-	}
-	if got.BannerOut != os.Stderr {
-		t.Error("normalize did not default BannerOut to os.Stderr")
 	}
 	if got.CurrentVersion != devVersion {
 		t.Errorf("CurrentVersion = %q, want %q for an unstamped build", got.CurrentVersion, devVersion)

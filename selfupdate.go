@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -46,11 +47,6 @@ type Config struct {
 	// fewer, so an unsupported user gets a clear refusal before any
 	// network call.
 	Platforms []Platform
-	// BannerOut is the stream the passive update notice is written to.
-	// Nil means os.Stderr. The core update path does not write here; the
-	// field lives on Config so a caller configures the tool's identity
-	// once and hands the same value to the notifier wiring.
-	BannerOut io.Writer
 	// Stdout receives user-facing progress, including the version
 	// transition line. Nil means os.Stdout.
 	Stdout io.Writer
@@ -80,9 +76,6 @@ func (c Config) normalize() (Config, error) {
 	}
 	if c.Stdout == nil {
 		c.Stdout = os.Stdout
-	}
-	if c.BannerOut == nil {
-		c.BannerOut = os.Stderr
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
@@ -235,6 +228,17 @@ func Install(ctx context.Context, cfg Config, opts ...Option) (Result, error) {
 		return Result{}, err
 	}
 
+	// Windows self-update needs a rename-aside dance this library does not
+	// implement yet, so the write path is gated before any network work —
+	// the download is skipped entirely and the user is pointed at the
+	// releases page. checkOnly still reports below, and Check plus the
+	// passive banner are unaffected, because those never write.
+	if runtime.GOOS == "windows" && !o.checkOnly {
+		return Result{PreviousVersion: cfg.CurrentVersion},
+			fmt.Errorf("%w; download the latest build from https://github.com/%s/%s/releases/latest",
+				ErrWindowsNotSupported, cfg.Owner, cfg.Repo)
+	}
+
 	info, err := checkNormalized(ctx, cfg)
 	if err != nil {
 		return Result{PreviousVersion: cfg.CurrentVersion}, err
@@ -252,6 +256,16 @@ func Install(ctx context.Context, cfg Config, opts ...Option) (Result, error) {
 		return result, nil
 	}
 
+	// A development build is never replaced without --force. Its version
+	// is unknown, so every real release outranks it; overwriting the
+	// binary a developer just built, without asking, is the wrong default.
+	if !o.force && isDevVersion(cfg.CurrentVersion) {
+		_, _ = fmt.Fprintf(cfg.Stdout,
+			"%s is a development build (%s); run with --force to install %s\n",
+			cfg.BinaryName, cfg.CurrentVersion, info.LatestVersion)
+		return result, nil
+	}
+
 	if managed, reason := DetectManaged(cfg.TargetPath); managed {
 		return result, fmt.Errorf("%w: %s: %s", ErrManagedInstall, cfg.TargetPath, reason)
 	}
@@ -259,7 +273,7 @@ func Install(ctx context.Context, cfg Config, opts ...Option) (Result, error) {
 		return result, probeErr
 	}
 
-	_, _ = fmt.Fprintf(cfg.Stdout, "Upgrading from %s to %s\n", cfg.CurrentVersion, info.LatestVersion)
+	_, _ = fmt.Fprintf(cfg.Stdout, "Updating from %s to %s\n", cfg.CurrentVersion, info.LatestVersion)
 
 	installed, err := downloadVerifyInstall(ctx, cfg, info, o)
 	if err != nil {
