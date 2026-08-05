@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -296,6 +297,7 @@ func reportCheck(ctx context.Context, cmd *cobra.Command, cfg selfupdate.Config,
 	out := cfg.Stdout
 	if !info.UpdateAvailable {
 		_, _ = fmt.Fprintf(out, "%s is up to date (%s)\n", displayName(cfg), info.CurrentVersion)
+		warnIfNotInstallable(out, cfg)
 		return nil
 	}
 
@@ -310,7 +312,27 @@ func reportCheck(ctx context.Context, cmd *cobra.Command, cfg selfupdate.Config,
 			_, _ = fmt.Fprintf(out, "\nRelease notes for %s:\n%s\n", info.LatestVersion, info.ReleaseNotes)
 		}
 	}
+	warnIfNotInstallable(out, cfg)
 	return nil
+}
+
+// warnIfNotInstallable cautions when the running binary's location would
+// block an in-place update, so a check from a read-only directory does not
+// report "up to date" on a binary that update could never replace — the
+// failure would otherwise surface only once a release actually shipped.
+//
+// Only the writability guard is surfaced. A binary another installer owns
+// (a go-install build, a Homebrew binary) sits in a directory the user can
+// write, so it does not trip this warning; that case is a deliberate
+// choice with its own upgrade path, and the update command reports it
+// directly when run. The message reuses the library's own error text — the
+// same guidance the install path gives — minus the package prefix.
+func warnIfNotInstallable(out io.Writer, cfg selfupdate.Config) {
+	err := selfupdate.InstallPreflight(cfg)
+	if !errors.Is(err, selfupdate.ErrInstallDirNotWritable) {
+		return
+	}
+	_, _ = fmt.Fprintf(out, "warning: %s\n", strings.TrimPrefix(err.Error(), "go-selfupdate: "))
 }
 
 // reportMissingAsset renders the "a newer release exists, but not for

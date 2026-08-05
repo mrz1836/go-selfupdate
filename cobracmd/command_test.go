@@ -203,6 +203,64 @@ func TestCheckReportsUpToDate(t *testing.T) {
 	}
 }
 
+// TestCheckWarnsFromUnwritableInstallDir pins the preflight: a --check run
+// from a read-only install directory still reports the version, but also
+// warns that a future update could not replace the binary in place — the
+// silent trap where a /usr/local/bin binary passes --check forever and
+// only fails once a release actually ships.
+func TestCheckWarnsFromUnwritableInstallDir(t *testing.T) {
+	testutil.SkipOnWindows(t)
+	testutil.SkipIfRoot(t)
+
+	readOnly, _ := testutil.LockDir(t, t.TempDir())
+	cmd := New(selfupdate.Config{
+		Owner:          "acme",
+		Repo:           "widget",
+		BinaryName:     "widget",
+		CurrentVersion: "v1.2.0",
+		TargetPath:     filepath.Join(readOnly, "widget"),
+		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("same")).Release},
+	})
+
+	out, err := execute(t, cmd, "--check")
+	if err != nil {
+		t.Fatalf("execute --check: %v", err)
+	}
+	if !strings.Contains(out, "up to date") {
+		t.Errorf("output = %q, want the version still reported alongside the warning", out)
+	}
+	if !strings.Contains(out, "warning:") || !strings.Contains(out, "~/.local/bin") {
+		t.Errorf("output = %q, want a writability warning pointing at a user-writable dir", out)
+	}
+	if strings.Contains(out, "sudo") {
+		t.Errorf("output = %q, want no sudo suggestion", out)
+	}
+}
+
+// TestCheckFromWritableDirIsSilentAboutInstallability guards the other
+// edge: the preflight warning must fire only when the location is actually
+// a problem, so a normal writable install prints no warning noise.
+func TestCheckFromWritableDirIsSilentAboutInstallability(t *testing.T) {
+	t.Parallel()
+
+	cmd := New(selfupdate.Config{
+		Owner:          "acme",
+		Repo:           "widget",
+		BinaryName:     "widget",
+		CurrentVersion: "v1.2.0",
+		TargetPath:     filepath.Join(t.TempDir(), "widget"),
+		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("same")).Release},
+	})
+
+	out, err := execute(t, cmd, "--check")
+	if err != nil {
+		t.Fatalf("execute --check: %v", err)
+	}
+	if strings.Contains(out, "warning:") {
+		t.Errorf("output = %q, want no warning from a writable install directory", out)
+	}
+}
+
 func TestCheckVerbosePrintsReleaseNotes(t *testing.T) {
 	t.Parallel()
 
