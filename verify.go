@@ -36,25 +36,11 @@ const downloadFilePerm os.FileMode = 0o600
 // fetchChecksum downloads a goreleaser checksums file and returns the
 // hex digest recorded for assetName.
 func fetchChecksum(ctx context.Context, client *http.Client, checksumURL, assetName string) (string, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumURL, http.NoBody)
+	resp, err := httpGetOK(ctx, client, checksumURL, ErrChecksumFetchFailed, nil)
 	if err != nil {
-		return "", fmt.Errorf("%w: build request: %w", ErrChecksumFetchFailed, err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrChecksumFetchFailed, err)
+		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		drainErrorBody(resp.Body)
-		return "", fmt.Errorf("%w: status %d", ErrChecksumFetchFailed, resp.StatusCode)
-	}
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, checksumFileMaxBytes))
 	if err != nil {
@@ -117,25 +103,12 @@ func downloadAndVerifyWithCap(ctx context.Context, client *http.Client, url, exp
 	if expectedSHA256 == "" {
 		return fmt.Errorf("%w: %s", ErrChecksumMissing, dst)
 	}
-	if client == nil {
-		client = http.DefaultClient
-	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	resp, err := httpGetOK(ctx, client, url, ErrDownloadFailed, nil)
 	if err != nil {
-		return fmt.Errorf("%w: build request: %w", ErrDownloadFailed, err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrDownloadFailed, err)
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		drainErrorBody(resp.Body)
-		return fmt.Errorf("%w: status %d", ErrDownloadFailed, resp.StatusCode)
-	}
 
 	actual, written, err := streamToFile(resp.Body, dst, maxBytes)
 	if err != nil {

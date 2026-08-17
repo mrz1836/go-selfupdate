@@ -95,8 +95,14 @@ func IsNewer(current, latest string) bool {
 // prompt or a passive notice on "is this a real release?" should answer
 // the question the same way the ordering does, rather than re-deriving it.
 func IsDevVersion(v string) bool {
-	clean := strings.TrimPrefix(strings.TrimSpace(v), "v")
+	clean := normalizeVersion(v)
 	return clean == "" || clean == devVersion || isLikelyCommitHash(clean)
+}
+
+// normalizeVersion trims surrounding whitespace and a single leading "v"
+// so the rest of the comparison logic works on a bare version string.
+func normalizeVersion(v string) string {
+	return strings.TrimPrefix(strings.TrimSpace(v), "v")
 }
 
 // isLikelyCommitHash reports whether s has the shape of a git commit
@@ -129,7 +135,7 @@ func isLikelyCommitHash(s string) bool {
 // "-" segment such as "-rc.1". Build metadata (after "+") is stripped
 // first, because per the semver spec it does not affect precedence.
 func hasPrerelease(v string) bool {
-	clean := strings.TrimPrefix(strings.TrimSpace(v), "v")
+	clean := normalizeVersion(v)
 	if plus := strings.IndexByte(clean, '+'); plus >= 0 {
 		clean = clean[:plus]
 	}
@@ -141,7 +147,7 @@ func hasPrerelease(v string) bool {
 // suffix. Anything that is not exactly three integer components is an
 // error; callers translate that into a conservative "not newer".
 func parseVersionTuple(v string) ([3]int, error) {
-	clean := strings.TrimPrefix(strings.TrimSpace(v), "v")
+	clean := normalizeVersion(v)
 	if idx := strings.IndexAny(clean, "-+"); idx >= 0 {
 		clean = clean[:idx]
 	}

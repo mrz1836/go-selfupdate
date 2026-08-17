@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -79,12 +80,7 @@ func detectManaged(path string, getenv func(string) string) (bool, string) {
 // isHomebrewPath reports whether a resolved path sits inside a Homebrew
 // Cellar.
 func isHomebrewPath(resolved string) bool {
-	for _, part := range strings.Split(filepath.ToSlash(resolved), "/") {
-		if part == homebrewCellarDir {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Split(filepath.ToSlash(resolved), "/"), homebrewCellarDir)
 }
 
 // isGoBinPath reports whether a resolved path sits inside GOBIN or

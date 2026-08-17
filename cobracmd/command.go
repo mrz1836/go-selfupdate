@@ -301,8 +301,7 @@ func reportCheck(ctx context.Context, cmd *cobra.Command, cfg selfupdate.Config,
 		return nil
 	}
 
-	_, _ = fmt.Fprintf(out, "A new version of %s is available: %s -> %s\n",
-		displayName(cfg), info.CurrentVersion, info.LatestVersion)
+	printAvailable(out, cfg, info)
 	_, _ = fmt.Fprintf(out, "Run %q to install it.\n", cmd.CommandPath())
 	if verbose {
 		if info.ReleaseURL != "" {
@@ -335,12 +334,18 @@ func warnIfNotInstallable(out io.Writer, cfg selfupdate.Config) {
 	_, _ = fmt.Fprintf(out, "warning: %s\n", strings.TrimPrefix(err.Error(), "go-selfupdate: "))
 }
 
+// printAvailable writes the one-line "a new version is available"
+// transition shared by the check and missing-asset reports.
+func printAvailable(out io.Writer, cfg selfupdate.Config, info *selfupdate.Info) {
+	_, _ = fmt.Fprintf(out, "A new version of %s is available: %s -> %s\n",
+		displayName(cfg), info.CurrentVersion, info.LatestVersion)
+}
+
 // reportMissingAsset renders the "a newer release exists, but not for
 // your platform" case: name the version, then send the user somewhere
 // they can act — the release page when known, the releases list otherwise.
 func reportMissingAsset(out io.Writer, cfg selfupdate.Config, info *selfupdate.Info) error {
-	_, _ = fmt.Fprintf(out, "A new version of %s is available: %s -> %s\n",
-		displayName(cfg), info.CurrentVersion, info.LatestVersion)
+	printAvailable(out, cfg, info)
 	_, _ = fmt.Fprintf(out, "This release has no prebuilt binary for %s. ", selfupdate.CurrentPlatform())
 	if info.ReleaseURL != "" {
 		_, _ = fmt.Fprintf(out, "Download it from %s\n", info.ReleaseURL)

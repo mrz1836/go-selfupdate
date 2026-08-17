@@ -38,6 +38,43 @@ func drainErrorBody(body io.Reader) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(body, apiErrorBodyLimit))
 }
 
+// httpGetOK issues a GET and returns the response only when the status is
+// 200. It is the shared preamble behind the three GET call sites (release
+// metadata, checksum file, archive download): build the request, wrap a
+// build or transport failure with the caller's sentinel, and on a non-200
+// drain-and-close the body before returning the wrapped "status %d" error.
+//
+// A nil client falls back to [http.DefaultClient]. decorate, when non-nil,
+// sets request headers before the call. On success the open response is
+// returned and the caller owns its body — including the Close.
+func httpGetOK(ctx context.Context, client *http.Client, url string, sentinel error, decorate func(*http.Request)) (*http.Response, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("%w: build request: %w", sentinel, err)
+	}
+	if decorate != nil {
+		decorate(req)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", sentinel, err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		// Drain a bounded slice of the body so the connection stays
+		// reusable, then close it — the caller never sees this response.
+		drainErrorBody(resp.Body)
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("%w: status %d", sentinel, resp.StatusCode)
+	}
+	return resp, nil
+}
+
 // ReleaseSource is the seam between the update driver and whatever
 // actually produces release metadata. Two implementations ship here: one
 // that shells out to the `gh` CLI and one that talks to the GitHub REST
@@ -179,27 +216,16 @@ func (a *apiSource) Latest(ctx context.Context) (*Release, error) {
 
 // getJSON issues an authenticated GET and decodes the response into out.
 func (a *apiSource) getJSON(ctx context.Context, url string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	resp, err := httpGetOK(ctx, a.httpClient, url, ErrGitHubAPIFailed, func(req *http.Request) {
+		req.Header.Set("Accept", "application/vnd.github+json")
+		if a.token != "" {
+			req.Header.Set("Authorization", "Bearer "+a.token)
+		}
+	})
 	if err != nil {
-		return fmt.Errorf("%w: build request: %w", ErrGitHubAPIFailed, err)
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	if a.token != "" {
-		req.Header.Set("Authorization", "Bearer "+a.token)
-	}
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrGitHubAPIFailed, err)
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		// Drain a bounded slice of the body so the connection stays
-		// reusable without inviting an unbounded read.
-		drainErrorBody(resp.Body)
-		return fmt.Errorf("%w: status %d", ErrGitHubAPIFailed, resp.StatusCode)
-	}
 
 	if derr := json.NewDecoder(io.LimitReader(resp.Body, apiBodyLimit)).Decode(out); derr != nil {
 		return fmt.Errorf("%w: decode response: %w", ErrGitHubAPIFailed, derr)
