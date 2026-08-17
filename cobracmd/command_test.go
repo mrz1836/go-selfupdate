@@ -39,6 +39,25 @@ func execute(t *testing.T, cmd *cobra.Command, args ...string) (string, error) {
 	return out.String(), err
 }
 
+// newUpdateCmd builds an update command wired to a stub release source,
+// mirroring bannerConfig: fixed acme/widget identity, a throwaway install
+// target, and a quiet logger, so a test states only the versions and
+// payload that matter to it. opts are forwarded to New. Tests that seed or
+// inspect the install target keep an explicit Config instead.
+func newUpdateCmd(t *testing.T, currentVersion, latest string, payload []byte, opts ...CmdOption) *cobra.Command {
+	t.Helper()
+
+	return New(selfupdate.Config{
+		Owner:          "acme",
+		Repo:           "widget",
+		BinaryName:     "widget",
+		CurrentVersion: currentVersion,
+		TargetPath:     filepath.Join(t.TempDir(), "widget"),
+		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", latest, "widget", payload).Release},
+		Logger:         quietLogger(),
+	}, opts...)
+}
+
 func TestNewRegistersCoreFlags(t *testing.T) {
 	t.Parallel()
 
@@ -135,11 +154,8 @@ func TestCheckPerformsNoWrites(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	target := filepath.Join(dir, "widget")
 	original := []byte("the running binary")
-	if err := os.WriteFile(target, original, 0o755); err != nil { //nolint:gosec // a test fixture standing in for an executable
-		t.Fatalf("seed target: %v", err)
-	}
+	target := testutil.WriteTempFile(t, dir, "widget", original, 0o755)
 	before, err := os.Stat(target)
 	if err != nil {
 		t.Fatalf("stat target: %v", err)
@@ -185,14 +201,7 @@ func TestCheckPerformsNoWrites(t *testing.T) {
 func TestCheckReportsUpToDate(t *testing.T) {
 	t.Parallel()
 
-	cmd := New(selfupdate.Config{
-		Owner:          "acme",
-		Repo:           "widget",
-		BinaryName:     "widget",
-		CurrentVersion: "v1.2.0",
-		TargetPath:     filepath.Join(t.TempDir(), "widget"),
-		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("same")).Release},
-	})
+	cmd := newUpdateCmd(t, "v1.2.0", "1.2.0", []byte("same"))
 
 	out, err := execute(t, cmd, "--check")
 	if err != nil {
@@ -243,14 +252,7 @@ func TestCheckWarnsFromUnwritableInstallDir(t *testing.T) {
 func TestCheckFromWritableDirIsSilentAboutInstallability(t *testing.T) {
 	t.Parallel()
 
-	cmd := New(selfupdate.Config{
-		Owner:          "acme",
-		Repo:           "widget",
-		BinaryName:     "widget",
-		CurrentVersion: "v1.2.0",
-		TargetPath:     filepath.Join(t.TempDir(), "widget"),
-		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("same")).Release},
-	})
+	cmd := newUpdateCmd(t, "v1.2.0", "1.2.0", []byte("same"))
 
 	out, err := execute(t, cmd, "--check")
 	if err != nil {
@@ -264,14 +266,7 @@ func TestCheckFromWritableDirIsSilentAboutInstallability(t *testing.T) {
 func TestCheckVerbosePrintsReleaseNotes(t *testing.T) {
 	t.Parallel()
 
-	cmd := New(selfupdate.Config{
-		Owner:          "acme",
-		Repo:           "widget",
-		BinaryName:     "widget",
-		CurrentVersion: "v1.0.0",
-		TargetPath:     filepath.Join(t.TempDir(), "widget"),
-		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("new")).Release},
-	})
+	cmd := newUpdateCmd(t, "v1.0.0", "1.2.0", []byte("new"))
 
 	out, err := execute(t, cmd, "--check", "--verbose")
 	if err != nil {
@@ -346,10 +341,7 @@ func TestUpdateInstallsRelease(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	target := filepath.Join(dir, "widget")
-	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil { //nolint:gosec // a test fixture standing in for an executable
-		t.Fatalf("seed target: %v", err)
-	}
+	target := testutil.WriteTempFile(t, dir, "widget", []byte("old"), 0o755)
 
 	cmd := New(selfupdate.Config{
 		Owner:          "acme",
@@ -385,10 +377,7 @@ func TestUpdateAlreadyCurrentWithoutForce(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	target := filepath.Join(dir, "widget")
-	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil { //nolint:gosec // a test fixture standing in for an executable
-		t.Fatalf("seed target: %v", err)
-	}
+	target := testutil.WriteTempFile(t, dir, "widget", []byte("old"), 0o755)
 
 	cfg := selfupdate.Config{
 		Owner:          "acme",
@@ -435,14 +424,7 @@ func TestDeprecatedUseBinaryFlagIsHiddenAndInert(t *testing.T) {
 	t.Parallel()
 
 	newCmd := func() *cobra.Command {
-		return New(selfupdate.Config{
-			Owner:          "acme",
-			Repo:           "widget",
-			BinaryName:     "widget",
-			CurrentVersion: "v1.0.0",
-			TargetPath:     filepath.Join(t.TempDir(), "widget"),
-			Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("new")).Release},
-		}, WithDeprecatedUseBinaryFlag())
+		return newUpdateCmd(t, "v1.0.0", "1.2.0", []byte("new"), WithDeprecatedUseBinaryFlag())
 	}
 
 	flag := newCmd().Flags().Lookup(flagUseBinary)
@@ -595,14 +577,7 @@ func TestAttachBannerSilentDuringUpdate(t *testing.T) {
 
 	var banner bytes.Buffer
 	root := &cobra.Command{Use: "widget"}
-	root.AddCommand(New(selfupdate.Config{
-		Owner:          "acme",
-		Repo:           "widget",
-		BinaryName:     "widget",
-		CurrentVersion: "v1.0.0",
-		TargetPath:     filepath.Join(t.TempDir(), "widget"),
-		Source:         &updatetest.StubSource{Release: updatetest.NewReleaseFixture(t, "widget", "1.2.0", "widget", []byte("new")).Release},
-	}))
+	root.AddCommand(newUpdateCmd(t, "v1.0.0", "1.2.0", []byte("new")))
 	AttachBanner(root, bannerConfig(t, &banner, "v1.2.0"))
 
 	if _, err := execute(t, root, "update", "--check"); err != nil {
