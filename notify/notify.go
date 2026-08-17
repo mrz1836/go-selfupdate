@@ -281,7 +281,11 @@ func fetchAndCompare(ctx context.Context, cfg Config) *Result {
 
 	release, err := cfg.Source.Latest(fetchCtx)
 	if err != nil {
-		return &Result{CurrentVersion: cfg.CurrentVersion, CheckedAt: cfg.Now(), Err: err}
+		return &Result{
+			CurrentVersion: cfg.CurrentVersion,
+			CheckedAt:      cfg.Now(),
+			Err:            fmt.Errorf("go-selfupdate/notify: fetch latest release: %w", err),
+		}
 	}
 
 	// A cache write failure is not worth surfacing: the check itself

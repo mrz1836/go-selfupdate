@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -259,6 +260,51 @@ func TestWriteCacheIsAtomic(t *testing.T) {
 	}
 }
 
+// TestWriteCacheConcurrent proves the unique-staging-file scheme survives
+// concurrent writers: with a fixed staging name, one writer's temp (and
+// the cleanup that swept it) corrupted another's in-flight write and failed
+// its rename. Run under -race, every writer must succeed and the surviving
+// cache must be a whole, parseable entry.
+func TestWriteCacheConcurrent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := Config{AppName: "widget", CacheDir: dir, Now: func() time.Time { return frozen }}
+
+	const writers = 16
+	var wg sync.WaitGroup
+	errs := make([]error, writers)
+	for i := range writers {
+		wg.Go(func() {
+			errs[i] = WriteCache(cfg, &CacheEntry{CurrentVersion: "v1.0.0", LatestVersion: "v1.5.0"})
+		})
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent WriteCache[%d]: %v", i, err)
+		}
+	}
+
+	entry, err := ReadCache(cfg)
+	if err != nil {
+		t.Fatalf("ReadCache after concurrent writes: %v", err)
+	}
+	if entry == nil || entry.LatestVersion != "v1.5.0" {
+		t.Fatalf("cache after concurrent writes = %+v, want LatestVersion v1.5.0", entry)
+	}
+
+	// No staging file may outlive the writers.
+	staging, err := filepath.Glob(filepath.Join(dir, defaultCacheFileName+tempFilePattern))
+	if err != nil {
+		t.Fatalf("glob staging files: %v", err)
+	}
+	if len(staging) != 0 {
+		t.Fatalf("staging files survived concurrent writes: %v", staging)
+	}
+}
+
 // TestOrphanedTempFileIsCleaned covers the crashed-writer case: the
 // stale staging file is removed on the next cache operation.
 func TestOrphanedTempFileIsCleaned(t *testing.T) {
@@ -277,6 +323,43 @@ func TestOrphanedTempFileIsCleaned(t *testing.T) {
 	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Fatalf("orphaned temp file still present (stat err = %v)", err)
+	}
+}
+
+// TestStaleUniqueTempFileIsCleaned covers the age-gated sweep of the
+// unique staging files WriteCache creates: one old enough to be a
+// crashed-writer orphan is removed, while a fresh one — which a concurrent
+// writer could still be filling — is deliberately left untouched.
+func TestStaleUniqueTempFileIsCleaned(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := Config{AppName: "widget", CacheDir: dir}
+	path := filepath.Join(dir, defaultCacheFileName)
+
+	stale := path + ".stale.tmp"
+	fresh := path + ".fresh.tmp"
+	for _, p := range []string{stale, fresh} {
+		if err := os.WriteFile(p, []byte("{"), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", p, err)
+		}
+	}
+	// Age the stale file past the sweep window; leave the fresh one at its
+	// current mtime so it stands in for a concurrent writer's temp.
+	old := time.Now().Add(-2 * tempFileStaleAfter)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatalf("age stale temp: %v", err)
+	}
+
+	if _, err := ReadCache(cfg); err != nil {
+		t.Fatalf("ReadCache: %v", err)
+	}
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale staging file survived the sweep (stat err = %v)", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("fresh staging file was swept (stat err = %v); a concurrent writer's temp must survive", err)
 	}
 }
 
@@ -357,8 +440,15 @@ func TestWriteCacheRenameFailure(t *testing.T) {
 	if err := WriteCache(cfg, &CacheEntry{LatestVersion: "v1.0.0"}); err == nil {
 		t.Fatal("WriteCache() = nil error, want a rename failure")
 	}
-	if _, err := os.Stat(blocker + tempSuffix); !os.IsNotExist(err) {
-		t.Fatalf("staging file survived a failed rename (stat err = %v)", err)
+	// The staging file now carries a unique os.CreateTemp token, so assert
+	// against the whole pattern rather than a single fixed name: no temp of
+	// any spelling may survive a failed rename.
+	staging, err := filepath.Glob(filepath.Join(dir, defaultCacheFileName+tempFilePattern))
+	if err != nil {
+		t.Fatalf("glob staging files: %v", err)
+	}
+	if len(staging) != 0 {
+		t.Fatalf("staging files survived a failed rename: %v", staging)
 	}
 }
 

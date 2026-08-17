@@ -226,12 +226,34 @@ func WriteCache(cfg Config, entry *CacheEntry) error {
 		return fmt.Errorf("go-selfupdate/notify: marshal cache: %w", err)
 	}
 
-	tmp := path + tempSuffix
-	if werr := os.WriteFile(tmp, data, cacheFilePerm); werr != nil {
+	// Stage under a unique name so two concurrent writers cannot clobber
+	// each other. The old fixed-suffix scheme let one writer's staging file
+	// — and the cleanup that swept it — corrupt another writer's in-flight
+	// write, then fail its rename. os.CreateTemp hands each writer its own
+	// file; the rename stays atomic, so a reader sees the whole old entry
+	// or the whole new one, never a torn write.
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+tempFilePattern)
+	if err != nil {
+		return fmt.Errorf("go-selfupdate/notify: create cache temp: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	// os.CreateTemp already creates the file 0o600; re-assert cacheFilePerm
+	// best-effort so the mode stays explicit and independent of that
+	// default. The write and close errors collapse into one branch so a
+	// failed close cannot slip past a successful write.
+	_ = tmp.Chmod(cacheFilePerm)
+	_, werr := tmp.Write(data)
+	if cerr := tmp.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("go-selfupdate/notify: write cache temp: %w", werr)
 	}
-	if rerr := os.Rename(tmp, path); rerr != nil {
-		_ = os.Remove(tmp)
+
+	if rerr := os.Rename(tmpName, path); rerr != nil {
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("go-selfupdate/notify: rename cache: %w", rerr)
 	}
 	return nil
@@ -262,15 +284,41 @@ func ClearCache(cfg Config) error {
 	return nil
 }
 
-// tempSuffix is appended to the cache path for the atomic-write staging
-// file.
+// tempSuffix is the fixed staging-file suffix an earlier scheme used,
+// before staging moved to unique os.CreateTemp names. It is still swept so
+// a stray file written by a previous build does not linger.
 const tempSuffix = ".tmp"
 
-// cleanupOrphanedTempFiles removes a staging file left behind by a
-// crashed write. It is best-effort: failing to clean up a stray temp
-// file must never break the read or write that follows.
+// tempFilePattern is the os.CreateTemp pattern — and the matching glob —
+// for a staging file: the cache name, a unique token, then ".tmp".
+const tempFilePattern = ".*" + tempSuffix
+
+// tempFileStaleAfter is how old a unique staging file must be before an
+// orphan sweep removes it. A real write renames its temp into place in
+// milliseconds, so this window is what keeps the sweep from deleting a
+// file a concurrent writer is still filling.
+const tempFileStaleAfter = time.Hour
+
+// cleanupOrphanedTempFiles removes staging files left behind by a crashed
+// write. It is best-effort: failing to clean one up must never break the
+// read or write that follows.
+//
+// The fixed-suffix name the previous scheme used is removed outright — no
+// current writer produces it, so it can never be a live staging file. A
+// unique-named staging file is removed only once it is old enough that no
+// concurrent writer could still be filling it.
 func cleanupOrphanedTempFiles(path string) {
 	_ = os.Remove(path + tempSuffix)
+
+	// A bad glob pattern just yields no matches, which is the right
+	// best-effort outcome here, so the error is deliberately ignored.
+	matches, _ := filepath.Glob(path + tempFilePattern)
+	cutoff := time.Now().Add(-tempFileStaleAfter)
+	for _, m := range matches {
+		if info, statErr := os.Stat(m); statErr == nil && info.ModTime().Before(cutoff) {
+			_ = os.Remove(m)
+		}
+	}
 }
 
 // nowOrDefault returns the configured clock, or the real one.
