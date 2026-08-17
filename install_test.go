@@ -102,8 +102,8 @@ func TestInstallBinary(t *testing.T) {
 		dir := t.TempDir()
 		dst := testutil.WriteTempFile(t, dir, "widget", []byte("version one"), 0o755)
 
-		if err := installBinary(filepath.Join(dir, "absent"), dst); err == nil {
-			t.Fatal("installBinary() with a missing source = nil, want an error")
+		if err := installBinary(filepath.Join(dir, "absent"), dst); !errors.Is(err, ErrInstallFailed) {
+			t.Fatalf("installBinary() with a missing source = %v, want ErrInstallFailed", err)
 		}
 
 		got, err := os.ReadFile(dst) //nolint:gosec // test-controlled path
@@ -125,8 +125,8 @@ func TestInstallBinary(t *testing.T) {
 		src := testutil.WriteTempFile(t, t.TempDir(), "new-binary", []byte("version two"), 0o755)
 		_, dst := testutil.LockDir(t, t.TempDir())
 
-		if err := installBinary(src, dst); err == nil {
-			t.Fatal("installBinary() into a read-only directory = nil, want an error")
+		if err := installBinary(src, dst); !errors.Is(err, ErrInstallFailed) {
+			t.Fatalf("installBinary() into a read-only directory = %v, want ErrInstallFailed", err)
 		}
 
 		testutil.AssertFileContents(t, dst, "locked binary")
@@ -146,8 +146,8 @@ func TestInstallBinary(t *testing.T) {
 		}
 		testutil.WriteTempFile(t, dst, "keep", []byte("resident"), 0o644)
 
-		if err := installBinary(src, dst); err == nil {
-			t.Fatal("installBinary() renaming over a directory = nil, want an error")
+		if err := installBinary(src, dst); !errors.Is(err, ErrInstallFailed) {
+			t.Fatalf("installBinary() renaming over a directory = %v, want ErrInstallFailed", err)
 		}
 		if _, statErr := os.Stat(dst + ".new"); !errors.Is(statErr, os.ErrNotExist) {
 			t.Error("a failed rename left the staging file behind")

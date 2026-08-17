@@ -141,8 +141,8 @@ func TestExtractTarGz(t *testing.T) {
 		src := testutil.WriteTempFile(t, t.TempDir(), "a.tar.gz", archive, 0o600)
 		dest := t.TempDir()
 
-		if err := extractTarGz(src, dest); err == nil {
-			t.Fatal("extractTarGz() over a file-used-as-a-directory = nil, want an error")
+		if err := extractTarGz(src, dest); !errors.Is(err, ErrExtractFailed) {
+			t.Fatalf("extractTarGz() over a file-used-as-a-directory = %v, want ErrExtractFailed", err)
 		}
 	})
 
@@ -236,14 +236,14 @@ func TestExtractTarGz(t *testing.T) {
 	t.Run("a non-gzip file is reported, not panicked on", func(t *testing.T) {
 		src := testutil.WriteTempFile(t, t.TempDir(), "a.tar.gz", []byte("definitely not gzip"), 0o600)
 
-		if err := extractTarGz(src, t.TempDir()); err == nil {
-			t.Fatal("extractTarGz() on a non-gzip file = nil, want an error")
+		if err := extractTarGz(src, t.TempDir()); !errors.Is(err, ErrExtractFailed) {
+			t.Fatalf("extractTarGz() on a non-gzip file = %v, want ErrExtractFailed", err)
 		}
 	})
 
 	t.Run("a missing archive is reported", func(t *testing.T) {
-		if err := extractTarGz(filepath.Join(t.TempDir(), "absent.tar.gz"), t.TempDir()); err == nil {
-			t.Fatal("extractTarGz() on a missing file = nil, want an error")
+		if err := extractTarGz(filepath.Join(t.TempDir(), "absent.tar.gz"), t.TempDir()); !errors.Is(err, ErrExtractFailed) {
+			t.Fatalf("extractTarGz() on a missing file = %v, want ErrExtractFailed", err)
 		}
 	})
 }

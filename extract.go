@@ -98,13 +98,13 @@ func extractTarGz(src, dest string) error {
 func extractTarGzWithCap(src, dest string, maxBytes int64) error {
 	f, err := os.Open(src) //nolint:gosec // src is built inside a private temp dir owned by this package
 	if err != nil {
-		return fmt.Errorf("go-selfupdate: open archive: %w", err)
+		return fmt.Errorf("%w: open archive: %w", ErrExtractFailed, err)
 	}
 	defer func() { _ = f.Close() }()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		return fmt.Errorf("go-selfupdate: gzip reader: %w", err)
+		return fmt.Errorf("%w: gzip reader: %w", ErrExtractFailed, err)
 	}
 	defer func() { _ = gz.Close() }()
 
@@ -121,7 +121,7 @@ func extractAllEntries(tr *tar.Reader, dest string, maxBytes int64) error {
 			return nil
 		}
 		if herr != nil {
-			return fmt.Errorf("go-selfupdate: tar header: %w", herr)
+			return fmt.Errorf("%w: tar header: %w", ErrExtractFailed, herr)
 		}
 		if header.Typeflag != tar.TypeReg {
 			// Directories are created on demand per file, and symlinks
@@ -159,13 +159,13 @@ func extractOneFile(tr *tar.Reader, header *tar.Header, dest string, maxBytes in
 	}
 
 	if dirErr := os.MkdirAll(filepath.Dir(destPath), extractDirPerm); dirErr != nil {
-		return 0, fmt.Errorf("go-selfupdate: mkdir for %s: %w", destPath, dirErr)
+		return 0, fmt.Errorf("%w: mkdir for %s: %w", ErrExtractFailed, destPath, dirErr)
 	}
 
 	mode := normalizeFileMode(os.FileMode(header.Mode & 0o7777)) //nolint:gosec // masked to permission bits, then normalized
 	destFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
-		return 0, fmt.Errorf("go-selfupdate: create %s: %w", destPath, err)
+		return 0, fmt.Errorf("%w: create %s: %w", ErrExtractFailed, destPath, err)
 	}
 
 	// One byte past the cap so an entry sitting exactly at the limit is
@@ -178,17 +178,17 @@ func extractOneFile(tr *tar.Reader, header *tar.Header, dest string, maxBytes in
 		return 0, fmt.Errorf("%w: %s exceeds %d bytes", ErrFileTooLarge, header.Name, maxBytes)
 	}
 	if copyErr != nil {
-		return 0, fmt.Errorf("go-selfupdate: extract %s: %w", destPath, copyErr)
+		return 0, fmt.Errorf("%w: extract %s: %w", ErrExtractFailed, destPath, copyErr)
 	}
 	if closeErr != nil {
-		return 0, fmt.Errorf("go-selfupdate: close %s: %w", destPath, closeErr)
+		return 0, fmt.Errorf("%w: close %s: %w", ErrExtractFailed, destPath, closeErr)
 	}
 
 	// Chmod explicitly: os.OpenFile applies the caller's umask to the
 	// mode argument, and the archive's 0o755 is what we want regardless
 	// of how tight the user's umask is.
 	if chmodErr := os.Chmod(destPath, mode); chmodErr != nil {
-		return 0, fmt.Errorf("go-selfupdate: chmod %s: %w", destPath, chmodErr)
+		return 0, fmt.Errorf("%w: chmod %s: %w", ErrExtractFailed, destPath, chmodErr)
 	}
 	return written, nil
 }
@@ -219,7 +219,7 @@ func locateBinary(extractDir, binaryName string) (string, error) {
 		return nil
 	})
 	if walkErr != nil {
-		return "", fmt.Errorf("go-selfupdate: walk extract dir: %w", walkErr)
+		return "", fmt.Errorf("%w: walk extract dir: %w", ErrExtractFailed, walkErr)
 	}
 	if found == "" {
 		return "", fmt.Errorf("%w: %s", ErrBinaryNotFound, binaryName)

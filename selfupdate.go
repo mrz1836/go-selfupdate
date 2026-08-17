@@ -255,9 +255,10 @@ func checkNormalized(ctx context.Context, cfg Config) (*Info, error) {
 // atomically replace the running binary.
 //
 // There is exactly one install route. Because nothing falls back when it
-// fails, every stage returns a distinct sentinel wrapped with the
-// concrete path or asset involved, so the error alone tells the user
-// what to do next.
+// fails, each stage that can reject a release — platform guard, managed
+// check, writability probe, release lookup, checksum, extract, and binary
+// replace — returns a distinct sentinel wrapped with the concrete path or
+// asset involved, so the error alone tells the user what to do next.
 func Install(ctx context.Context, cfg Config, opts ...Option) (Result, error) {
 	var o installOptions
 	for _, opt := range opts {
@@ -293,10 +294,11 @@ func Install(ctx context.Context, cfg Config, opts ...Option) (Result, error) {
 		LatestVersion:   info.LatestVersion,
 		TargetPath:      cfg.TargetPath,
 	}
-	if o.checkOnly || (!info.UpdateAvailable && !o.force) {
-		if !o.checkOnly {
-			_, _ = fmt.Fprintf(cfg.Stdout, "%s is already up to date (%s)\n", cfg.BinaryName, cfg.CurrentVersion)
-		}
+	if o.checkOnly {
+		return result, nil
+	}
+	if !info.UpdateAvailable && !o.force {
+		_, _ = fmt.Fprintf(cfg.Stdout, "%s is already up to date (%s)\n", cfg.BinaryName, cfg.CurrentVersion)
 		return result, nil
 	}
 

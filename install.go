@@ -45,12 +45,12 @@ func installBinary(src, dst string) error {
 	tmp := dst + ".new"
 	if copyErr := copyFile(src, tmp, mode); copyErr != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("go-selfupdate: stage binary at %s: %w", tmp, copyErr)
+		return fmt.Errorf("%w: stage binary at %s: %w", ErrInstallFailed, tmp, copyErr)
 	}
 
 	if renErr := os.Rename(tmp, dst); renErr != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("go-selfupdate: install binary at %s: %w", dst, renErr)
+		return fmt.Errorf("%w: install binary at %s: %w", ErrInstallFailed, dst, renErr)
 	}
 
 	// The new binary is in place. copyFile already applied the mode to the

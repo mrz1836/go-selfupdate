@@ -42,13 +42,20 @@ var (
 	ErrChecksumMismatch    = errors.New("go-selfupdate: checksum verification failed")
 	ErrChecksumMissing     = errors.New("go-selfupdate: release has no checksums file; refusing to install unverified binary")
 
-	// Extract errors.
+	// Extract errors. ErrPathTraversal and ErrFileTooLarge classify the two
+	// security refusals; ErrExtractFailed classifies every other archive
+	// read or write failure, so a caller can tell a corrupt or unreadable
+	// archive apart from a hostile one.
 	ErrPathTraversal = errors.New("go-selfupdate: path traversal attempt detected")
 	ErrFileTooLarge  = errors.New("go-selfupdate: extracted file exceeds maximum allowed size")
+	ErrExtractFailed = errors.New("go-selfupdate: failed to extract release archive")
 
-	// Install errors.
+	// Install errors. ErrInstallDirNotWritable and ErrManagedInstall are
+	// the preflight refusals; ErrInstallFailed classifies a failure while
+	// staging or renaming the new binary into place.
 	ErrInstallDirNotWritable = errors.New("go-selfupdate: install dir not writable")
 	ErrManagedInstall        = errors.New("go-selfupdate: binary is managed by another installer; refusing to replace it")
+	ErrInstallFailed         = errors.New("go-selfupdate: failed to install binary")
 
 	// Configuration errors.
 	ErrIncompleteConfig = errors.New("go-selfupdate: incomplete configuration")
