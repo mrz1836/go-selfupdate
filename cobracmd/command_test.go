@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -695,5 +696,278 @@ func TestBoolFlagNamesTheFlagOnFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--"+flagForce) {
 		t.Errorf("error = %v, want it to name the flag", err)
+	}
+}
+
+// wantLookupReport is the one line WithErrorReporting writes for the
+// failed release lookup the TestErrorReporting* tests stage under the
+// "widget" root.
+const wantLookupReport = "widget: update: go-selfupdate: GitHub API request failed: boom\n"
+
+// errorReportingConfig returns a config whose release lookup fails with
+// srcErr, so every run takes the error path WithErrorReporting reports.
+func errorReportingConfig(t *testing.T, srcErr error) selfupdate.Config {
+	t.Helper()
+
+	return selfupdate.Config{
+		Owner:          "acme",
+		Repo:           "widget",
+		BinaryName:     "widget",
+		CurrentVersion: "v1.0.0",
+		TargetPath:     filepath.Join(t.TempDir(), "widget"),
+		Source:         &updatetest.StubSource{Err: srcErr},
+		Logger:         quietLogger(),
+	}
+}
+
+// errorReportingCmd builds an update command whose release lookup fails
+// with srcErr. opts are forwarded to New.
+func errorReportingCmd(t *testing.T, srcErr error, opts ...CmdOption) *cobra.Command {
+	t.Helper()
+
+	return New(errorReportingConfig(t, srcErr), opts...)
+}
+
+// widgetRoot returns the root WithErrorReporting is meant for: one that
+// silences cobra's own error and usage output, so anything on stderr was
+// written by the update command.
+func widgetRoot() *cobra.Command {
+	return &cobra.Command{Use: "widget", SilenceErrors: true, SilenceUsage: true}
+}
+
+// executeSplit runs cmd with args and returns what it wrote to each stream
+// separately, so a test can tell an error report from normal output.
+func executeSplit(t *testing.T, cmd *cobra.Command, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs(args)
+	err = cmd.Execute()
+	return out.String(), errOut.String(), err
+}
+
+// TestErrorReportingPrintsOnePrefixedLine pins the report itself: a failed
+// check or install writes exactly one "<root>: <command>: <error>" line to
+// stderr, named by the canonical command even when invoked through the
+// alias, and nothing about the failure leaks onto stdout.
+func TestErrorReportingPrintsOnePrefixedLine(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		skipOnWindows bool
+	}{
+		{"check", []string{"update", "--check"}, false},
+		// Install refuses on Windows before it looks up a release.
+		{"install", []string{"update"}, true},
+		{"alias", []string{"upgrade", "--check"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if tc.skipOnWindows && runtime.GOOS == "windows" {
+				t.Skip("install is refused on windows before the release lookup")
+			}
+
+			lookupErr := fmt.Errorf("%w: boom", selfupdate.ErrGitHubAPIFailed)
+			root := widgetRoot()
+			root.AddCommand(errorReportingCmd(t, lookupErr, WithErrorReporting()))
+
+			stdout, stderr, err := executeSplit(t, root, tc.args...)
+			if !errors.Is(err, selfupdate.ErrGitHubAPIFailed) {
+				t.Fatalf("error = %v, want the lookup failure returned", err)
+			}
+			if stderr != wantLookupReport {
+				t.Errorf("stderr = %q, want exactly %q", stderr, wantLookupReport)
+			}
+			if strings.Contains(stdout, "boom") {
+				t.Errorf("stdout = %q, want the failure reported on stderr only", stdout)
+			}
+		})
+	}
+}
+
+// TestErrorReportingRootCommandPrefix pins the prefix rule: the root
+// segment is dropped when the update command is itself the root or the
+// root has no name, and a custom command name is reported as given.
+func TestErrorReportingRootCommandPrefix(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		opts  []CmdOption
+		mount func(cmd *cobra.Command) *cobra.Command
+		args  []string
+		want  string
+	}{
+		{
+			name: "command is root",
+			mount: func(cmd *cobra.Command) *cobra.Command {
+				cmd.SilenceErrors = true
+				cmd.SilenceUsage = true
+				return cmd
+			},
+			args: []string{"--check"},
+			want: "update: go-selfupdate: GitHub API request failed: boom\n",
+		},
+		{
+			name: "unnamed root",
+			mount: func(cmd *cobra.Command) *cobra.Command {
+				root := &cobra.Command{SilenceErrors: true, SilenceUsage: true}
+				root.AddCommand(cmd)
+				return root
+			},
+			args: []string{"update", "--check"},
+			want: "update: go-selfupdate: GitHub API request failed: boom\n",
+		},
+		{
+			name: "custom name",
+			opts: []CmdOption{WithUse("upgrade")},
+			mount: func(cmd *cobra.Command) *cobra.Command {
+				root := widgetRoot()
+				root.AddCommand(cmd)
+				return root
+			},
+			args: []string{"upgrade", "--check"},
+			want: "widget: upgrade: go-selfupdate: GitHub API request failed: boom\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			lookupErr := fmt.Errorf("%w: boom", selfupdate.ErrGitHubAPIFailed)
+			opts := append([]CmdOption{WithErrorReporting()}, tc.opts...)
+			root := tc.mount(errorReportingCmd(t, lookupErr, opts...))
+
+			_, stderr, err := executeSplit(t, root, tc.args...)
+			if !errors.Is(err, selfupdate.ErrGitHubAPIFailed) {
+				t.Fatalf("error = %v, want the lookup failure returned", err)
+			}
+			if stderr != tc.want {
+				t.Errorf("stderr = %q, want exactly %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+// TestErrorReportingCollapsesNewlines pins the one-line guarantee: a
+// multi-line error is reported with its newlines turned into spaces and
+// nothing else changed.
+func TestErrorReportingCollapsesNewlines(t *testing.T) {
+	t.Parallel()
+
+	root := widgetRoot()
+	root.AddCommand(errorReportingCmd(t, errors.New("line one\nline two"), WithErrorReporting()))
+
+	_, stderr, err := executeSplit(t, root, "update", "--check")
+	if err == nil {
+		t.Fatal("the failed lookup returned no error")
+	}
+	if want := "widget: update: line one line two\n"; stderr != want {
+		t.Errorf("stderr = %q, want exactly %q", stderr, want)
+	}
+}
+
+// TestErrorReportingSkipsUsageErrors pins that cobra rejects a stray
+// argument or an unknown flag before the command runs, so the option never
+// prints a usage error; the error is still returned to the caller.
+func TestErrorReportingSkipsUsageErrors(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"positional arg", []string{"update", "stray"}},
+		{"unknown flag", []string{"update", "--no-such-flag"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			lookupErr := fmt.Errorf("%w: boom", selfupdate.ErrGitHubAPIFailed)
+			root := widgetRoot()
+			root.AddCommand(errorReportingCmd(t, lookupErr, WithErrorReporting()))
+
+			_, stderr, err := executeSplit(t, root, tc.args...)
+			if err == nil {
+				t.Fatal("the usage error was not returned")
+			}
+			if errors.Is(err, selfupdate.ErrGitHubAPIFailed) {
+				t.Fatalf("error = %v, want cobra's usage error, not the release lookup", err)
+			}
+			if stderr != "" {
+				t.Errorf("stderr = %q, want nothing printed for a usage error", stderr)
+			}
+		})
+	}
+}
+
+// TestErrorReportingReturnsErrorUnchanged pins that the option only
+// prints: the caller gets back the very error value the release source
+// returned, with or without it.
+func TestErrorReportingReturnsErrorUnchanged(t *testing.T) {
+	t.Parallel()
+
+	for _, enabled := range []bool{true, false} {
+		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
+			t.Parallel()
+
+			var opts []CmdOption
+			if enabled {
+				opts = append(opts, WithErrorReporting())
+			}
+			lookupErr := fmt.Errorf("%w: boom", selfupdate.ErrGitHubAPIFailed)
+			root := widgetRoot()
+			root.AddCommand(errorReportingCmd(t, lookupErr, opts...))
+
+			_, _, err := executeSplit(t, root, "update", "--check")
+			if err != lookupErr {
+				t.Errorf("error = %v (%T), want the source's error value itself", err, err)
+			}
+			if !errors.Is(err, selfupdate.ErrGitHubAPIFailed) {
+				t.Errorf("error = %v, want it to still match ErrGitHubAPIFailed", err)
+			}
+		})
+	}
+}
+
+// TestErrorReportingDisabledByDefault pins the default: without the
+// option the command prints nothing about a failure, leaving that to the
+// caller as before.
+func TestErrorReportingDisabledByDefault(t *testing.T) {
+	t.Parallel()
+
+	lookupErr := fmt.Errorf("%w: boom", selfupdate.ErrGitHubAPIFailed)
+	root := widgetRoot()
+	root.AddCommand(errorReportingCmd(t, lookupErr))
+
+	_, stderr, err := executeSplit(t, root, "update", "--check")
+	if !errors.Is(err, selfupdate.ErrGitHubAPIFailed) {
+		t.Fatalf("error = %v, want the lookup failure returned", err)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want nothing printed without the option", stderr)
+	}
+}
+
+// TestErrorReportingThroughAttach pins that the option reaches the
+// command through Attach as well as New, and that the banner hooks Attach
+// wires stay quiet around a failed update.
+func TestErrorReportingThroughAttach(t *testing.T) {
+	t.Parallel()
+
+	lookupErr := fmt.Errorf("%w: boom", selfupdate.ErrGitHubAPIFailed)
+	root := widgetRoot()
+	Attach(root, errorReportingConfig(t, lookupErr), WithErrorReporting())
+
+	_, stderr, err := executeSplit(t, root, "update", "--check")
+	if !errors.Is(err, selfupdate.ErrGitHubAPIFailed) {
+		t.Fatalf("error = %v, want the lookup failure returned", err)
+	}
+	if stderr != wantLookupReport {
+		t.Errorf("stderr = %q, want exactly %q", stderr, wantLookupReport)
 	}
 }
