@@ -83,6 +83,7 @@ type cmdOptions struct {
 	short         string
 	long          string
 	useBinaryFlag bool
+	reportErrors  bool
 }
 
 // CmdOption adjusts the command returned by [New].
@@ -135,6 +136,30 @@ func WithDeprecatedUseBinaryFlag() CmdOption {
 	return func(o *cmdOptions) { o.useBinaryFlag = true }
 }
 
+// WithErrorReporting makes the command print a failed update to its error
+// stream as one "<root>: <command>: <error>" line before returning the
+// error.
+//
+// By default the command returns its errors without printing them, which
+// is right for a tool that prints errors at the top level. A tool whose
+// root sets SilenceErrors and prints nothing itself would instead exit
+// with only a status code, leaving the user to guess why a checksum
+// mismatch or a network failure stopped the update. Enable it only when
+// the root command sets SilenceErrors and does not print errors itself;
+// otherwise the failure is reported twice.
+//
+// <command> is the command's canonical name, so an update invoked through
+// an alias still reports under that name, and <root> is dropped when the
+// command is itself the root. Newlines in the error text collapse to
+// spaces so the report stays on one line; nothing else is reworded. The
+// error is returned unchanged, so errors.Is, errors.As, and exit codes
+// behave exactly as without the option. Usage errors — an unknown flag, a
+// stray argument — are rejected by cobra before the command runs, so this
+// option never sees or prints them.
+func WithErrorReporting() CmdOption {
+	return func(o *cmdOptions) { o.reportErrors = true }
+}
+
 // New returns the drop-in update command for cfg.
 //
 // cfg is the same [selfupdate.Config] the programmatic API takes; only
@@ -160,7 +185,11 @@ func New(cfg selfupdate.Config, opts ...CmdOption) *cobra.Command {
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{annotationKey: annotationValue},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runUpdate(cmd, cfg)
+			err := runUpdate(cmd, cfg)
+			if o.reportErrors {
+				reportError(cmd, err)
+			}
+			return err
 		},
 	}
 
@@ -385,6 +414,20 @@ func boolFlag(cmd *cobra.Command, name string) (bool, error) {
 		return false, fmt.Errorf("go-selfupdate/cobracmd: read --%s: %w", name, err)
 	}
 	return value, nil
+}
+
+// reportError writes err to cmd's error stream as one
+// "<root>: <command>: <error>" line for [WithErrorReporting]. The root
+// segment is dropped when cmd is the root or the root has no name.
+func reportError(cmd *cobra.Command, err error) {
+	if err == nil {
+		return
+	}
+	prefix := cmd.Name() + ": "
+	if root := cmd.Root(); root != cmd && root.Name() != "" {
+		prefix = root.Name() + ": " + prefix
+	}
+	_, _ = fmt.Fprintln(cmd.ErrOrStderr(), prefix+strings.ReplaceAll(err.Error(), "\n", " "))
 }
 
 // commandContext returns the command's context, tolerating a command
