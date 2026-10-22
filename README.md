@@ -332,6 +332,10 @@ The core package does not import `managed/`; the dependency runs one way only.
 just the command and `AttachBanner` wires just the notice when you need them apart. All
 three are shown in step 1 above.
 
+A tool whose root sets `SilenceErrors` and never prints errors itself can pass
+`cobracmd.WithErrorReporting()` to `New` or `Attach`, so a failed update prints one
+`<root>: <command>: <error>` line to stderr instead of exiting with only a status code.
+
 </details>
 
 <details>
